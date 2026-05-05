@@ -78,12 +78,17 @@ export function generateMap(seed = Math.floor(Math.random() * 10000)) {
       const h = (heightNoise.octave(x * scale, y * scale) * 0.5 + 0.5) * edgeFade;
       const m = moistureNoise.octave(x * scale * 0.8, y * scale * 0.8) * 0.5 + 0.5;
 
+      // High-frequency noise used to scatter trees rather than solid blobs
+      const treeThreshold = resourceNoise.noise(x * 0.38, y * 0.38) * 0.5 + 0.5;
+
       let terrain;
       if      (h < 0.25) terrain = TERRAIN.DEEP_WATER;
       else if (h < 0.32) terrain = TERRAIN.SHALLOW_WATER;
       else if (h < 0.38) terrain = TERRAIN.SAND;
       else if (h < 0.60) terrain = m > 0.6 ? TERRAIN.DARK_GRASS : TERRAIN.GRASS;
-      else if (h < 0.72) terrain = TERRAIN.FOREST;
+      else if (h < 0.72) terrain = treeThreshold > 0.52
+                           ? TERRAIN.FOREST
+                           : (m > 0.6 ? TERRAIN.DARK_GRASS : TERRAIN.GRASS);
       else if (h < 0.85) terrain = TERRAIN.MOUNTAIN;
       else               terrain = TERRAIN.SNOW;
 

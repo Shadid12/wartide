@@ -20,3 +20,6 @@ Workers should be able to collect gold.
 
 '/Users/shadid/Documents/shadid/wartide/assets/sprites/worker/worker_run_Gold.png' Use this animation when worker is carrying gold back to townhall
 
+Make the tree generation more spread apart.
+
+Now remove the cyan line as I am done debuggin

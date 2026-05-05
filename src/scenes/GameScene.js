@@ -134,6 +134,9 @@ export default class GameScene extends Phaser.Scene {
     this.workers = [];
     this.selectedWorkers = [];
 
+    // Debug overlay
+    this.debugGraphics = this.add.graphics().setDepth(50);
+
     // Shared selection ring graphics (world space)
     this.selectionGraphics = this.add.graphics().setDepth(4);
 
@@ -242,19 +245,28 @@ export default class GameScene extends Phaser.Scene {
           }
 
           if (valid) {
-            // Mark the full visual footprint (TOWNHALL_BLOCK × TOWNHALL_BLOCK)
-            // as impassable, centred on the 3×3 sprite anchor tile.
+            // Building block dimensions — must match _drawDebug cyan box
             const offset = Math.floor((TOWNHALL_BLOCK - fp) / 2);
-            for (let fy = 0; fy < TOWNHALL_BLOCK; fy++) {
-              for (let fx = 0; fx < TOWNHALL_BLOCK; fx++) {
-                const nx = tx - offset + fx;
-                const ny = ty - offset + fy;
+            const blockX = tx - offset;
+            const blockY = ty - offset - 2; // shifted up to match sprite visual top
+            const blockW = TOWNHALL_BLOCK;
+            const blockH = TOWNHALL_BLOCK - 1;
+
+            for (let fy = 0; fy < blockH; fy++) {
+              for (let fx = 0; fx < blockW; fx++) {
+                const nx = blockX + fx;
+                const ny = blockY + fy;
                 if (nx < 0 || ny < 0 || nx >= MAP_WIDTH || ny >= MAP_HEIGHT) continue;
                 this.mapTiles[ny][nx] = TERRAIN.BUILDING;
               }
             }
 
             this.townHall = new TownHall(this, tx, ty);
+            // Store block bounds for debug rendering and navigation
+            this.townHall.blockX = blockX;
+            this.townHall.blockY = blockY;
+            this.townHall.blockW = blockW;
+            this.townHall.blockH = blockH;
             return;
           }
         }
@@ -786,8 +798,12 @@ export default class GameScene extends Phaser.Scene {
 
   _hitTestTownHall(wx, wy) {
     if (!this.townHall) return false;
-    const b = this.townHall.sprite.getBounds();
-    return wx >= b.x && wx <= b.right && wy >= b.y && wy <= b.bottom;
+    const { blockX, blockY, blockW, blockH } = this.townHall;
+    const bx = blockX * TILE_SIZE, by = blockY * TILE_SIZE;
+    return wx >= bx && wx <= bx + blockW * TILE_SIZE && wy >= by && wy <= by + blockH * TILE_SIZE;
+  }
+
+  _drawDebug() {
   }
 
   // ─── Minimap ────────────────────────────────────────────────────────────────
@@ -978,6 +994,7 @@ export default class GameScene extends Phaser.Scene {
     }
 
     for (const w of this.workers) w.update(delta);
+    this._drawDebug();
     this.drawSelectionRings();
     this._drawRallyMarker();
     this._drawRallyLine();
