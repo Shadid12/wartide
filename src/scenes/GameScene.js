@@ -53,6 +53,7 @@ export default class GameScene extends Phaser.Scene {
       frameHeight: 192,
     });
     this.load.image('townhall', 'assets/sprites/townhall/town.png');
+    this.load.image('stump', 'assets/sprites/trees/Stump_1.png');
   }
 
   create() {
@@ -156,26 +157,29 @@ export default class GameScene extends Phaser.Scene {
       ).setDepth(1).setInteractive();
       sprite.on('pointerover', () => this.showResourceTooltip(res, sprite));
       sprite.on('pointerout',  () => this.hideResourceTooltip());
-      res.sprite = sprite; // attach sprite directly for easy cleanup
+      res.sprite    = sprite;
+      res.maxAmount = res.amount; // record initial amount for depletion scaling
     }
   }
 
   buildForestLayer() {
+    this.treeSprites = new Map(); // key: "x,y" → sprite
+
     for (let y = 0; y < MAP_HEIGHT; y++) {
       for (let x = 0; x < MAP_WIDTH; x++) {
         if (this.mapTiles[y][x] !== TERRAIN.FOREST) continue;
 
         const wx = x * TILE_SIZE + TILE_SIZE / 2;
         const wy = y * TILE_SIZE + TILE_SIZE;
-
-        // Stagger start frame so trees don't all sway in sync
         const startFrame = (x * 3 + y * 7) % 8;
 
-        this.add.sprite(wx, wy, 'tree1')
+        const tree = this.add.sprite(wx, wy, 'tree1')
           .setDepth(3)
           .setOrigin(0.5, 1)
           .setScale(0.84)
           .play({ key: 'tree_sway', startFrame });
+
+        this.treeSprites.set(`${x},${y}`, tree);
       }
     }
   }
@@ -347,8 +351,32 @@ export default class GameScene extends Phaser.Scene {
     const collected = Math.min(amount, resource.amount);
     resource.amount -= collected;
 
+    const key = `${resource.x},${resource.y}`;
+    const treeSprite = this.treeSprites?.get(key);
+
+    // Below 1200 wood: swap to stump and make tile walkable (one-time transition)
+    if (resource.amount < 1200 && this.mapTiles[resource.y][resource.x] === TERRAIN.FOREST) {
+      this.mapTiles[resource.y][resource.x] = TERRAIN.GRASS;
+      treeSprite?.destroy();
+      const stump = this.add.image(
+        resource.x * TILE_SIZE + TILE_SIZE / 2,
+        resource.y * TILE_SIZE + TILE_SIZE,
+        'stump'
+      ).setDepth(3).setOrigin(0.5, 1).setScale(0.84);
+      this.treeSprites.set(key, stump);
+    } else if (treeSprite && this.mapTiles[resource.y][resource.x] === TERRAIN.FOREST) {
+      // Still a full tree — scale it down as wood is removed
+      const ratio = resource.amount / resource.maxAmount;
+      treeSprite.setScale(0.84 * Math.max(0.4, ratio));
+    }
+
     if (resource.amount <= 0) {
       resource.sprite?.destroy();
+      this.treeSprites?.get(key)?.destroy();
+      this.treeSprites?.delete(key);
+      if (this.mapTiles[resource.y][resource.x] !== TERRAIN.GRASS) {
+        this.mapTiles[resource.y][resource.x] = TERRAIN.GRASS;
+      }
       const idx = this.mapResources.indexOf(resource);
       if (idx !== -1) this.mapResources.splice(idx, 1);
       // Cancel all other workers targeting this depleted resource
@@ -873,45 +901,6 @@ export default class GameScene extends Phaser.Scene {
     }
   }
 
-  // ─── Worker separation ──────────────────────────────────────────────────────
-
-  separateWorkers() {
-    const SEP   = 28;
-    const tiles = this.mapTiles;
-
-    for (let i = 0; i < this.workers.length; i++) {
-      for (let j = i + 1; j < this.workers.length; j++) {
-        const a = this.workers[i], b = this.workers[j];
-        const dx = a.x - b.x, dy = a.y - b.y;
-        const distSq = dx * dx + dy * dy;
-        if (distSq >= SEP * SEP) continue;
-
-        // Snapshot before push so we can revert into walls
-        const ax0 = a.x, ay0 = a.y, bx0 = b.x, by0 = b.y;
-
-        if (distSq < 0.01) {
-          a.x += 0.5; b.x -= 0.5;
-        } else {
-          const dist = Math.sqrt(distSq);
-          const push = (SEP - dist) * 0.5;
-          const nx = dx / dist, ny = dy / dist;
-          a.x += nx * push; a.y += ny * push;
-          b.x -= nx * push; b.y -= ny * push;
-        }
-
-        // Revert if pushed into a non-walkable tile
-        const tileOk = (wx, wy) =>
-          WALKABLE.has(tiles[Math.floor(wy / TILE_SIZE)]?.[Math.floor(wx / TILE_SIZE)]);
-
-        if (!tileOk(a.x, a.y)) { a.x = ax0; a.y = ay0; }
-        if (!tileOk(b.x, b.y)) { b.x = bx0; b.y = by0; }
-
-        a.sprite.setPosition(a.x, a.y);
-        b.sprite.setPosition(b.x, b.y);
-      }
-    }
-  }
-
   // ─── Main loop ──────────────────────────────────────────────────────────────
 
   update(_time, delta) {
@@ -923,7 +912,6 @@ export default class GameScene extends Phaser.Scene {
     }
 
     for (const w of this.workers) w.update(delta);
-    this.separateWorkers();
     this.drawSelectionRings();
     this.updateMinimapViewport();
     this.updateBuildingPanel();

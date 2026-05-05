@@ -4,3 +4,8 @@ Next let's add some units. We will add only workers unit for now. Workers should
 
 workers should have the ability to collect resources. When you select a worker or multiple workers you can click on a resourse like tree and the worker will start collecting it. A worker takes 10 seconds to collect 20 wood from a tree.
 
+When the worker collects 20 woods he will go back to the town center to drop it off and only then the wood count updates.
+
+When workers collecting wood. The tree's wood amount should also reduce.
+
+When a tree has less than 1200 wood it will have the following sprite. Workers will be able to walk over this tile at this point.
