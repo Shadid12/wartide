@@ -13,3 +13,10 @@ When a tree has less than 1200 wood it will have the following sprite. Workers w
 We need the functionality to add a rallying point from the townhall so the works rally in that point.
 
 when I unselect the town hall the rally flag will disappear from the map.
+
+Workers should be able to collect gold. 
+
++20 gold text should be gold color
+
+'/Users/shadid/Documents/shadid/wartide/assets/sprites/worker/worker_run_Gold.png' Use this animation when worker is carrying gold back to townhall
+

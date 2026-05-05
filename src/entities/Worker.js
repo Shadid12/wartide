@@ -83,8 +83,9 @@ export default class Worker {
   _navigateToDropoff() {
     const th = this.scene.townHall;
     if (!th) return;
-    // Navigate to townhall center tile; pathfinder redirects to nearest walkable edge
-    this._navigateTo(th.tileX + 1, th.tileY + 1, 'worker_run_wood');
+    const type = this._carrying?.type;
+    const anim = type === 'wood' ? 'worker_run_wood' : type === 'gold' ? 'worker_run_gold' : 'worker_run';
+    this._navigateTo(th.tileX + 1, th.tileY + 1, anim);
   }
 
   _tryBeginHarvest() {
@@ -96,7 +97,7 @@ export default class Worker {
     if (Math.sqrt(dx * dx + dy * dy) <= HARVEST_RANGE) {
       this._harvesting   = true;
       this._harvestTimer = 0;
-      this.sprite.play('worker_axe');
+      this.sprite.play(res.type === 'gold' ? 'worker_pickaxe' : 'worker_axe');
     } else {
       this._cancelHarvest();
     }

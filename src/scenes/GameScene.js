@@ -52,6 +52,14 @@ export default class GameScene extends Phaser.Scene {
       frameWidth: 192,
       frameHeight: 192,
     });
+    this.load.spritesheet('worker_pickaxe', 'assets/sprites/worker/worker_Interact_pickaxe.png', {
+      frameWidth: 192,
+      frameHeight: 192,
+    });
+    this.load.spritesheet('worker_run_gold', 'assets/sprites/worker/worker_run_Gold.png', {
+      frameWidth: 192,
+      frameHeight: 192,
+    });
     this.load.image('townhall', 'assets/sprites/townhall/town.png');
     this.load.image('stump', 'assets/sprites/trees/Stump_1.png');
   }
@@ -74,6 +82,18 @@ export default class GameScene extends Phaser.Scene {
     this.anims.create({
       key: 'worker_axe',
       frames: this.anims.generateFrameNumbers('worker_axe', { start: 0, end: 5 }),
+      frameRate: 8,
+      repeat: -1,
+    });
+    this.anims.create({
+      key: 'worker_run_gold',
+      frames: this.anims.generateFrameNumbers('worker_run_gold', { start: 0, end: 5 }),
+      frameRate: 10,
+      repeat: -1,
+    });
+    this.anims.create({
+      key: 'worker_pickaxe',
+      frames: this.anims.generateFrameNumbers('worker_pickaxe', { start: 0, end: 5 }),
       frameRate: 8,
       repeat: -1,
     });
@@ -406,13 +426,14 @@ export default class GameScene extends Phaser.Scene {
     const th = this.townHall;
     const px = th ? (th.tileX + 1.5) * TILE_SIZE : worker.x;
     const py = th ? th.tileY * TILE_SIZE - 20      : worker.y;
-    this._showHarvestPopup(px, py, `+${amount} ${type}`);
+    const color = type === RESOURCE.GOLD ? '#ffd700' : type === RESOURCE.OIL ? '#aaaaaa' : '#00ff88';
+    this._showHarvestPopup(px, py, `+${amount} ${type}`, color);
   }
 
-  _showHarvestPopup(wx, wy, text) {
+  _showHarvestPopup(wx, wy, text, color = '#00ff88') {
     const t = this.add.text(wx, wy - 20, text, {
       fontSize: '12px', fontFamily: 'monospace',
-      color: '#00ff88', stroke: '#000000', strokeThickness: 2,
+      color, stroke: '#000000', strokeThickness: 2,
     }).setDepth(10).setOrigin(0.5, 1);
 
     this.tweens.add({
