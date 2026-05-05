@@ -5,7 +5,7 @@ import Worker from '../entities/Worker.js';
 import {
   TILE_SIZE, MAP_WIDTH, MAP_HEIGHT,
   MINIMAP_WIDTH, MINIMAP_HEIGHT, MINIMAP_X, MINIMAP_Y,
-  TERRAIN, RESOURCE, TERRAIN_COLORS, RESOURCE_COLORS,
+  TERRAIN, RESOURCE, TERRAIN_COLORS, RESOURCE_COLORS, WALKABLE,
 } from '../config/gameConfig.js';
 
 const CAM_SPEED = 400;
@@ -13,9 +13,6 @@ const SCROLL_MARGIN = 24;
 const DRAG_THRESHOLD = 6;       // px of mouse travel before it's a drag
 const WORKER_COUNT = 8;
 const FORMATION_SPACING = 44;   // px between workers in move formation
-
-// Passable terrain (workers can walk on these)
-const WALKABLE = new Set([TERRAIN.SAND, TERRAIN.GRASS, TERRAIN.DARK_GRASS]);
 
 function formationPositions(cx, cy, count) {
   if (count === 1) return [{ x: cx, y: cy }];

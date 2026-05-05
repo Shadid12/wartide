@@ -1,7 +1,9 @@
 import { TILE_SIZE } from '../config/gameConfig.js';
+import { findPath } from '../utils/Pathfinder.js';
 
 const SPEED = 140; // px/sec
 const HIT_RADIUS = 18;
+const ARRIVE_DIST = 2;
 
 export default class Worker {
   constructor(scene, x, y) {
@@ -12,6 +14,8 @@ export default class Worker {
     this.targetY = y;
     this.moving = false;
     this.selected = false;
+    this._path = [];
+    this._pathIdx = 0;
 
     this.sprite = scene.add.sprite(x, y, 'worker_idle')
       .setDepth(5)
@@ -20,9 +24,25 @@ export default class Worker {
       .play('worker_idle');
   }
 
-  moveTo(x, y) {
-    this.targetX = x;
-    this.targetY = y;
+  moveTo(wx, wy) {
+    const tiles = this.scene.mapTiles;
+    const startTX = Math.floor(this.x / TILE_SIZE);
+    const startTY = Math.floor(this.y / TILE_SIZE);
+    const endTX   = Math.floor(wx / TILE_SIZE);
+    const endTY   = Math.floor(wy / TILE_SIZE);
+
+    const tilePath = findPath(tiles, startTX, startTY, endTX, endTY);
+    if (!tilePath || tilePath.length <= 1) return;
+
+    // Convert tile coords to world-space waypoints (tile centres)
+    this._path = tilePath.slice(1).map(p => ({
+      x: p.x * TILE_SIZE + TILE_SIZE / 2,
+      y: p.y * TILE_SIZE + TILE_SIZE / 2,
+    }));
+    this._pathIdx = 0;
+    this.targetX  = this._path[0].x;
+    this.targetY  = this._path[0].y;
+
     if (!this.moving) {
       this.moving = true;
       this.sprite.play('worker_run');
@@ -33,7 +53,6 @@ export default class Worker {
     this.selected = val;
   }
 
-  // Returns true if world point (px, py) hits this worker
   hitTest(px, py) {
     const dx = this.x - px;
     const dy = this.y - py;
@@ -48,11 +67,19 @@ export default class Worker {
     const dy = this.targetY - this.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
 
-    if (dist < 2) {
+    if (dist < ARRIVE_DIST) {
       this.x = this.targetX;
       this.y = this.targetY;
-      this.moving = false;
-      this.sprite.play('worker_idle');
+
+      this._pathIdx++;
+      if (this._pathIdx < this._path.length) {
+        this.targetX = this._path[this._pathIdx].x;
+        this.targetY = this._path[this._pathIdx].y;
+      } else {
+        this._path = [];
+        this.moving = false;
+        this.sprite.play('worker_idle');
+      }
     } else {
       const step = Math.min(SPEED * dt, dist);
       this.x += (dx / dist) * step;

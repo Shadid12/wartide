@@ -43,3 +43,5 @@ export const RESOURCE_COLORS = {
   [RESOURCE.WOOD]: 0x8b4513,
   [RESOURCE.OIL]:  0x1a1a1a,
 };
+
+export const WALKABLE = new Set([TERRAIN.SAND, TERRAIN.GRASS, TERRAIN.DARK_GRASS]);
