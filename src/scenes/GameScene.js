@@ -2,11 +2,13 @@ import Phaser from 'phaser';
 import { generateMap } from '../utils/MapGenerator.js';
 import { createTileTextures } from '../utils/TextureFactory.js';
 import Worker from '../entities/Worker.js';
+import TownHall, { TOWNHALL_FOOTPRINT } from '../entities/TownHall.js';
 import {
   TILE_SIZE, MAP_WIDTH, MAP_HEIGHT,
   MINIMAP_WIDTH, MINIMAP_HEIGHT, MINIMAP_X, MINIMAP_Y,
   TERRAIN, RESOURCE, TERRAIN_COLORS, RESOURCE_COLORS, WALKABLE,
 } from '../config/gameConfig.js';
+
 
 const CAM_SPEED = 400;
 const SCROLL_MARGIN = 24;
@@ -42,6 +44,7 @@ export default class GameScene extends Phaser.Scene {
       frameWidth: 192,
       frameHeight: 256,
     });
+    this.load.image('townhall', 'assets/sprites/townhall/town.png');
   }
 
   create() {
@@ -76,6 +79,8 @@ export default class GameScene extends Phaser.Scene {
     this.setupCamera();
     this.buildMinimap();
     this.buildHUD();
+
+    this.spawnTownHall();
 
     this.workers = [];
     this.selectedWorkers = [];
@@ -154,6 +159,43 @@ export default class GameScene extends Phaser.Scene {
     this.cameras.main.setBounds(0, 0, worldW, worldH);
     this.cameras.main.setZoom(1);
     this.cameras.main.centerOn(worldW / 2, worldH / 2);
+  }
+
+  // ─── TownHall ───────────────────────────────────────────────────────────────
+
+  spawnTownHall() {
+    const cx = Math.floor(MAP_WIDTH  / 2);
+    const cy = Math.floor(MAP_HEIGHT / 2);
+    const fp = TOWNHALL_FOOTPRINT;
+
+    // Search outward from center for a clear fp×fp walkable area
+    for (let r = 0; r < 30; r++) {
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
+          const tx = cx + dx - Math.floor(fp / 2);
+          const ty = cy + dy - Math.floor(fp / 2);
+
+          let valid = true;
+          for (let fy = 0; fy < fp && valid; fy++) {
+            for (let fx = 0; fx < fp && valid; fx++) {
+              const nx = tx + fx, ny = ty + fy;
+              if (nx < 1 || ny < 1 || nx >= MAP_WIDTH - 1 || ny >= MAP_HEIGHT - 1) { valid = false; break; }
+              if (!WALKABLE.has(this.mapTiles[ny][nx])) { valid = false; break; }
+            }
+          }
+
+          if (valid) {
+            for (let fy = 0; fy < fp; fy++)
+              for (let fx = 0; fx < fp; fx++)
+                this.mapTiles[ty + fy][tx + fx] = TERRAIN.BUILDING;
+
+            this.townHall = new TownHall(this, tx, ty);
+            return;
+          }
+        }
+      }
+    }
   }
 
   // ─── Workers ────────────────────────────────────────────────────────────────

@@ -17,6 +17,7 @@ export const TERRAIN = {
   FOREST: 5,
   MOUNTAIN: 6,
   SNOW: 7,
+  BUILDING: 8,
 };
 
 // Resource types
@@ -36,6 +37,7 @@ export const TERRAIN_COLORS = {
   [TERRAIN.FOREST]:        0x1a3d0a,
   [TERRAIN.MOUNTAIN]:      0x7a6a5a,
   [TERRAIN.SNOW]:          0xe8e8e8,
+  [TERRAIN.BUILDING]:      0x8b6914,
 };
 
 export const RESOURCE_COLORS = {
