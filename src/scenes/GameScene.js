@@ -41,6 +41,10 @@ export default class GameScene extends Phaser.Scene {
       frameWidth: 192,
       frameHeight: 192,
     });
+    this.load.spritesheet('tree1', 'assets/sprites/trees/Tree1.png', {
+      frameWidth: 192,
+      frameHeight: 256,
+    });
   }
 
   create() {
@@ -58,6 +62,12 @@ export default class GameScene extends Phaser.Scene {
       frameRate: 10,
       repeat: -1,
     });
+    this.anims.create({
+      key: 'tree_sway',
+      frames: this.anims.generateFrameNumbers('tree1', { start: 0, end: 7 }),
+      frameRate: 6,
+      repeat: -1,
+    });
 
     const { tiles, resources } = generateMap();
     this.mapTiles = tiles;
@@ -65,6 +75,7 @@ export default class GameScene extends Phaser.Scene {
 
     this.buildTileMap();
     this.buildResourceLayer();
+    this.buildForestLayer();
     this.setupCamera();
     this.buildMinimap();
     this.buildHUD();
@@ -117,6 +128,26 @@ export default class GameScene extends Phaser.Scene {
       sprite.on('pointerover', () => this.showResourceTooltip(res, sprite));
       sprite.on('pointerout',  () => this.hideResourceTooltip());
       this.resourceSprites.push(sprite);
+    }
+  }
+
+  buildForestLayer() {
+    for (let y = 0; y < MAP_HEIGHT; y++) {
+      for (let x = 0; x < MAP_WIDTH; x++) {
+        if (this.mapTiles[y][x] !== TERRAIN.FOREST) continue;
+
+        const wx = x * TILE_SIZE + TILE_SIZE / 2;
+        const wy = y * TILE_SIZE + TILE_SIZE;
+
+        // Stagger start frame so trees don't all sway in sync
+        const startFrame = (x * 3 + y * 7) % 8;
+
+        this.add.sprite(wx, wy, 'tree1')
+          .setDepth(3)
+          .setOrigin(0.5, 1)
+          .setScale(0.84)
+          .play({ key: 'tree_sway', startFrame });
+      }
     }
   }
 

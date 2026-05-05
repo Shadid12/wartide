@@ -59,16 +59,6 @@ export function createTileTextures(scene) {
       key: `tile_${TERRAIN.FOREST}`,
       draw(g) {
         g.fillStyle(0x1a3d0a); g.fillRect(0, 0, ts, ts);
-        // Tree canopies
-        g.fillStyle(0x2a6015);
-        g.fillTriangle(12, 4, 4, 20, 20, 20);
-        g.fillTriangle(35, 2, 27, 18, 43, 18);
-        g.fillTriangle(22, 24, 14, 40, 30, 40);
-        g.fillTriangle(42, 26, 34, 42, 50, 42);
-        // Trunks
-        g.fillStyle(0x5c3d1e);
-        g.fillRect(10, 20, 4, 6); g.fillRect(33, 18, 4, 6);
-        g.fillRect(20, 40, 4, 6); g.fillRect(40, 42, 4, 4);
       }
     },
     {
