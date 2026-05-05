@@ -1,4 +1,4 @@
-import { TILE_SIZE } from '../config/gameConfig.js';
+import { TILE_SIZE, WALKABLE } from '../config/gameConfig.js';
 import { findPath } from '../utils/Pathfinder.js';
 
 const SPEED = 140; // px/sec
@@ -82,8 +82,22 @@ export default class Worker {
       }
     } else {
       const step = Math.min(SPEED * dt, dist);
-      this.x += (dx / dist) * step;
-      this.y += (dy / dist) * step;
+      const nx = this.x + (dx / dist) * step;
+      const ny = this.y + (dy / dist) * step;
+
+      const tiles = this.scene.mapTiles;
+      const tileX = Math.floor(nx / TILE_SIZE);
+      const tileY = Math.floor(ny / TILE_SIZE);
+      if (WALKABLE.has(tiles[tileY]?.[tileX])) {
+        this.x = nx;
+        this.y = ny;
+      } else {
+        // Blocked mid-step (e.g. pushed by separation) — stop and replan
+        this._path  = [];
+        this.moving = false;
+        this.sprite.play('worker_idle');
+      }
+
       this.sprite.setFlipX(dx < 0);
     }
 

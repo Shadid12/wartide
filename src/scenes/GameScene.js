@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { generateMap } from '../utils/MapGenerator.js';
 import { createTileTextures } from '../utils/TextureFactory.js';
 import Worker from '../entities/Worker.js';
-import TownHall, { TOWNHALL_FOOTPRINT } from '../entities/TownHall.js';
+import TownHall, { TOWNHALL_FOOTPRINT, TOWNHALL_BLOCK, TRAIN_COST } from '../entities/TownHall.js';
 import {
   TILE_SIZE, MAP_WIDTH, MAP_HEIGHT,
   MINIMAP_WIDTH, MINIMAP_HEIGHT, MINIMAP_X, MINIMAP_Y,
@@ -13,7 +13,7 @@ import {
 const CAM_SPEED = 400;
 const SCROLL_MARGIN = 24;
 const DRAG_THRESHOLD = 6;       // px of mouse travel before it's a drag
-const WORKER_COUNT = 8;
+const WORKER_COUNT = 2;
 const FORMATION_SPACING = 44;   // px between workers in move formation
 
 function formationPositions(cx, cy, count) {
@@ -81,6 +81,14 @@ export default class GameScene extends Phaser.Scene {
     this.buildHUD();
 
     this.spawnTownHall();
+
+    this.gold = 10000;
+    this.wood  = 0;
+    this.oil   = 0;
+    this.updateResourceHUD();
+
+    this.selectedBuilding = null;
+    this.buildBuildingPanel();
 
     this.workers = [];
     this.selectedWorkers = [];
@@ -186,9 +194,17 @@ export default class GameScene extends Phaser.Scene {
           }
 
           if (valid) {
-            for (let fy = 0; fy < fp; fy++)
-              for (let fx = 0; fx < fp; fx++)
-                this.mapTiles[ty + fy][tx + fx] = TERRAIN.BUILDING;
+            // Mark the full visual footprint (TOWNHALL_BLOCK × TOWNHALL_BLOCK)
+            // as impassable, centred on the 3×3 sprite anchor tile.
+            const offset = Math.floor((TOWNHALL_BLOCK - fp) / 2);
+            for (let fy = 0; fy < TOWNHALL_BLOCK; fy++) {
+              for (let fx = 0; fx < TOWNHALL_BLOCK; fx++) {
+                const nx = tx - offset + fx;
+                const ny = ty - offset + fy;
+                if (nx < 0 || ny < 0 || nx >= MAP_WIDTH || ny >= MAP_HEIGHT) continue;
+                this.mapTiles[ny][nx] = TERRAIN.BUILDING;
+              }
+            }
 
             this.townHall = new TownHall(this, tx, ty);
             return;
@@ -232,6 +248,7 @@ export default class GameScene extends Phaser.Scene {
     if (!append) {
       this.selectedWorkers.forEach(w => w.setSelected(false));
       this.selectedWorkers = [];
+      this._hideBuildingPanel();
     }
     for (const w of list) {
       if (!w.selected) {
@@ -245,7 +262,22 @@ export default class GameScene extends Phaser.Scene {
   deselectAll() {
     this.selectedWorkers.forEach(w => w.setSelected(false));
     this.selectedWorkers = [];
+    this._hideBuildingPanel();
     this.updateUnitCountHUD();
+  }
+
+  _hideBuildingPanel() {
+    this.selectedBuilding = null;
+    this.buildingPanel?.setVisible(false);
+  }
+
+  selectBuilding(building) {
+    this.selectedWorkers.forEach(w => w.setSelected(false));
+    this.selectedWorkers = [];
+    this.updateUnitCountHUD();
+    this.selectedBuilding = building;
+    this.buildingPanel.setVisible(true);
+    this.updateBuildingPanel();
   }
 
   workerAtWorldPoint(wx, wy) {
@@ -288,6 +320,9 @@ export default class GameScene extends Phaser.Scene {
 
     this.input.keyboard.on('keydown-SHIFT', () => { this._shiftHeld = true;  });
     this.input.keyboard.on('keyup-SHIFT',   () => { this._shiftHeld = false; });
+    this.input.keyboard.on('keydown-T', () => {
+      if (this.selectedBuilding === this.townHall) this.trainWorker();
+    });
 
     this.input.on('pointerdown', this._onPointerDown, this);
     this.input.on('pointermove', this._onPointerMove, this);
@@ -297,6 +332,12 @@ export default class GameScene extends Phaser.Scene {
   _isOverMinimap(sx, sy) {
     return sx >= MINIMAP_X && sx <= MINIMAP_X + MINIMAP_WIDTH &&
            sy >= MINIMAP_Y && sy <= MINIMAP_Y + MINIMAP_HEIGHT;
+  }
+
+  _isOverBuildingPanel(sx, sy) {
+    if (!this.buildingPanel?.visible || !this._buildingPanelBounds) return false;
+    const { x, y, w, h } = this._buildingPanelBounds;
+    return sx >= x && sx <= x + w && sy >= y && sy <= y + h;
   }
 
   _onPointerDown(pointer) {
@@ -309,6 +350,14 @@ export default class GameScene extends Phaser.Scene {
 
     if (!pointer.leftButtonDown()) return;
     if (this._isOverMinimap(pointer.x, pointer.y)) return;
+    if (this._isOverBuildingPanel(pointer.x, pointer.y)) return;
+
+    // Building click check (before worker check so the building takes priority)
+    if (this._hitTestTownHall(pointer.worldX, pointer.worldY)) {
+      this.selectBuilding(this.townHall);
+      this._dragStart = null;
+      return;
+    }
 
     const hit = this.workerAtWorldPoint(pointer.worldX, pointer.worldY);
     if (hit) {
@@ -405,6 +454,147 @@ export default class GameScene extends Phaser.Scene {
     g.lineStyle(1.5, 0x44ff88, alpha);
     g.lineBetween(wx - 6, wy, wx + 6, wy);
     g.lineBetween(wx, wy - 6, wx, wy + 6);
+  }
+
+  // ─── Building panel ─────────────────────────────────────────────────────────
+
+  buildBuildingPanel() {
+    const { width: W, height: H } = this.cameras.main;
+    const PW = 284, PH = 142, PX = 8, PY = H - 48 - PH - 4;
+
+    // Store bounds so _onPointerDown can ignore clicks inside the panel
+    this._buildingPanelBounds = { x: PX, y: PY, w: PW, h: PH };
+
+    this.buildingPanel = this.add.container(0, 0).setScrollFactor(0).setDepth(205).setVisible(false);
+
+    const bg = this.add.graphics();
+    bg.fillStyle(0x1a1a2e, 0.93);
+    bg.fillRoundedRect(PX, PY, PW, PH, 6);
+    bg.lineStyle(1, 0x555588);
+    bg.strokeRoundedRect(PX, PY, PW, PH, 6);
+
+    const title = this.add.text(PX + 10, PY + 8, 'TOWN HALL', {
+      fontSize: '13px', fontFamily: 'monospace', color: '#ffd700', fontStyle: 'bold',
+    });
+
+    // Square icon-style button (Warcraft 2 style)
+    const BTN_X = PX + 10, BTN_Y = PY + 32, BTN_W = 52, BTN_H = 52;
+    this._btnGeom = { x: BTN_X, y: BTN_Y, w: BTN_W, h: BTN_H };
+    this._trainBtnBg = this.add.graphics();
+    this._drawTrainBtn(false);
+
+    // Animated worker sprite as the icon
+    const workerIcon = this.add.sprite(BTN_X + BTN_W / 2, BTN_Y + BTN_H / 2 - 4, 'worker_idle')
+      .setScale(0.23)
+      .setOrigin(0.5, 0.5)
+      .play('worker_idle');
+
+    // Cost badge at bottom of button
+    const costLabel = this.add.text(BTN_X + BTN_W / 2, BTN_Y + BTN_H - 1, `${TRAIN_COST}g`, {
+      fontSize: '9px', fontFamily: 'monospace', color: '#ffd700', align: 'center',
+      stroke: '#000000', strokeThickness: 2,
+    }).setOrigin(0.5, 1);
+
+    // Keybind hint
+    const keyHint = this.add.text(BTN_X + BTN_W - 2, BTN_Y + 2, 'T', {
+      fontSize: '8px', fontFamily: 'monospace', color: '#888888',
+    }).setOrigin(1, 0);
+
+    this._queueText = this.add.text(BTN_X + BTN_W + 12, BTN_Y + 4, '', {
+      fontSize: '11px', fontFamily: 'monospace', color: '#aaaaff', lineSpacing: 4,
+    });
+
+    const BAR_X = PX + 10, BAR_Y = PY + 96, BAR_W = PW - 20;
+    this._barGeom = { x: BAR_X, y: BAR_Y, w: BAR_W, h: 14 };
+
+    const barBg = this.add.graphics();
+    barBg.fillStyle(0x222244, 1);
+    barBg.fillRoundedRect(BAR_X, BAR_Y, BAR_W, 14, 3);
+
+    this._progressFill = this.add.graphics();
+    this._progressText = this.add.text(PX + PW / 2, BAR_Y - 3, '', {
+      fontSize: '10px', fontFamily: 'monospace', color: '#88ccff',
+    }).setOrigin(0.5, 1);
+
+    this.buildingPanel.add([
+      bg, title, this._trainBtnBg, workerIcon, costLabel, keyHint,
+      this._queueText, barBg, this._progressFill, this._progressText,
+    ]);
+
+    // Interactive zone lives outside the container so Phaser hit-tests it correctly
+    const btnZone = this.add.zone(BTN_X + BTN_W / 2, BTN_Y + BTN_H / 2, BTN_W, BTN_H)
+      .setScrollFactor(0).setDepth(206).setInteractive();
+    btnZone.on('pointerdown', () => { if (this.buildingPanel.visible) this.trainWorker(); });
+    btnZone.on('pointerover', () => { if (this.buildingPanel.visible) this._drawTrainBtn(true); });
+    btnZone.on('pointerout',  () => { if (this.buildingPanel.visible) this._drawTrainBtn(false); });
+  }
+
+  _drawTrainBtn(hovered) {
+    const g = this._trainBtnBg;
+    if (!g || !this._btnGeom) return;
+    const { x, y, w, h } = this._btnGeom;
+    g.clear();
+    g.fillStyle(hovered ? 0x3a3a6e : 0x252540, 1);
+    g.fillRoundedRect(x, y, w, h, 4);
+    g.lineStyle(1, hovered ? 0x8888cc : 0x555580);
+    g.strokeRoundedRect(x, y, w, h, 4);
+  }
+
+  updateBuildingPanel() {
+    if (!this.buildingPanel?.visible || !this.townHall) return;
+    const th = this.townHall;
+
+    const dots = '●'.repeat(th.queueLength) + '○'.repeat(5 - th.queueLength);
+    this._queueText.setText(`Queue\n${dots}`);
+
+    const { x, y, w, h } = this._barGeom;
+    this._progressFill.clear();
+    if (th.isTraining) {
+      this._progressFill.fillStyle(0x44aa44, 1);
+      this._progressFill.fillRoundedRect(x, y, Math.max(4, w * th.trainProgress), h, 3);
+      this._progressText.setText(`${th.trainTimeRemaining}s`);
+    } else {
+      this._progressText.setText(th.queueLength > 0 ? '' : 'Ready');
+    }
+  }
+
+  // ─── Training ───────────────────────────────────────────────────────────────
+
+  trainWorker() {
+    if (!this.townHall) return;
+    if (this.gold < TRAIN_COST) return;
+    if (!this.townHall.enqueue()) return; // queue full
+    this.gold -= TRAIN_COST;
+    this.updateResourceHUD();
+    this.updateBuildingPanel();
+  }
+
+  spawnWorkerAtRallyPoint() {
+    if (!this.townHall) return;
+    const { tileX, tileY } = this.townHall;
+    const fp = TOWNHALL_FOOTPRINT;
+    const cx = tileX + Math.floor(fp / 2);
+    const cy = tileY + Math.floor(fp / 2);
+
+    for (let r = 5; r < 20; r++) {
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
+          const nx = cx + dx, ny = cy + dy;
+          if (nx < 0 || ny < 0 || nx >= MAP_WIDTH || ny >= MAP_HEIGHT) continue;
+          if (!WALKABLE.has(this.mapTiles[ny][nx])) continue;
+          this.workers.push(new Worker(this, nx * TILE_SIZE + TILE_SIZE / 2, ny * TILE_SIZE + TILE_SIZE / 2));
+          this.updateUnitCountHUD();
+          return;
+        }
+      }
+    }
+  }
+
+  _hitTestTownHall(wx, wy) {
+    if (!this.townHall) return false;
+    const b = this.townHall.sprite.getBounds();
+    return wx >= b.x && wx <= b.right && wy >= b.y && wy <= b.bottom;
   }
 
   // ─── Minimap ────────────────────────────────────────────────────────────────
@@ -548,6 +738,12 @@ export default class GameScene extends Phaser.Scene {
     this.unitCountText?.setText(sel > 0 ? `Workers: ${sel}/${total} selected` : `Workers: ${total}`);
   }
 
+  updateResourceHUD() {
+    this.goldText?.setText(this.gold.toString());
+    this.woodText?.setText(this.wood.toString());
+    this.oilText?.setText(this.oil.toString());
+  }
+
   showResourceTooltip(res, sprite) {
     const sx = (sprite.x - this.cameras.main.worldView.x) * this.cameras.main.zoom;
     const sy = (sprite.y - this.cameras.main.worldView.y) * this.cameras.main.zoom;
@@ -578,14 +774,60 @@ export default class GameScene extends Phaser.Scene {
     }
   }
 
+  // ─── Worker separation ──────────────────────────────────────────────────────
+
+  separateWorkers() {
+    const SEP   = 28;
+    const tiles = this.mapTiles;
+
+    for (let i = 0; i < this.workers.length; i++) {
+      for (let j = i + 1; j < this.workers.length; j++) {
+        const a = this.workers[i], b = this.workers[j];
+        const dx = a.x - b.x, dy = a.y - b.y;
+        const distSq = dx * dx + dy * dy;
+        if (distSq >= SEP * SEP) continue;
+
+        // Snapshot before push so we can revert into walls
+        const ax0 = a.x, ay0 = a.y, bx0 = b.x, by0 = b.y;
+
+        if (distSq < 0.01) {
+          a.x += 0.5; b.x -= 0.5;
+        } else {
+          const dist = Math.sqrt(distSq);
+          const push = (SEP - dist) * 0.5;
+          const nx = dx / dist, ny = dy / dist;
+          a.x += nx * push; a.y += ny * push;
+          b.x -= nx * push; b.y -= ny * push;
+        }
+
+        // Revert if pushed into a non-walkable tile
+        const tileOk = (wx, wy) =>
+          WALKABLE.has(tiles[Math.floor(wy / TILE_SIZE)]?.[Math.floor(wx / TILE_SIZE)]);
+
+        if (!tileOk(a.x, a.y)) { a.x = ax0; a.y = ay0; }
+        if (!tileOk(b.x, b.y)) { b.x = bx0; b.y = by0; }
+
+        a.sprite.setPosition(a.x, a.y);
+        b.sprite.setPosition(b.x, b.y);
+      }
+    }
+  }
+
   // ─── Main loop ──────────────────────────────────────────────────────────────
 
-  update(time, delta) {
+  update(_time, delta) {
     this.handleCameraScroll(delta);
 
+    if (this.townHall) {
+      const completed = this.townHall.update(delta);
+      for (let i = 0; i < completed; i++) this.spawnWorkerAtRallyPoint();
+    }
+
     for (const w of this.workers) w.update(delta);
+    this.separateWorkers();
     this.drawSelectionRings();
     this.updateMinimapViewport();
+    this.updateBuildingPanel();
   }
 
   handleCameraScroll(delta) {
