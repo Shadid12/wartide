@@ -16,6 +16,11 @@ const DRAG_THRESHOLD = 6;       // px of mouse travel before it's a drag
 const WORKER_COUNT = 2;
 const FORMATION_SPACING = 44;   // px between workers in move formation
 
+const BUILDINGS = {
+  farm:     { w: 2, h: 2, goldCost: 0,   woodCost: 500, color: 0x5a9e5a, label: 'Farm' },
+  barracks: { w: 3, h: 3, goldCost: 700, woodCost: 0,   color: 0x8b3030, label: 'Barracks' },
+};
+
 function formationPositions(cx, cy, count) {
   if (count === 1) return [{ x: cx, y: cy }];
   const cols = Math.ceil(Math.sqrt(count));
@@ -130,6 +135,10 @@ export default class GameScene extends Phaser.Scene {
 
     this.selectedBuilding = null;
     this.buildBuildingPanel();
+    this.buildWorkerPanel();
+
+    this._buildMode = null;
+    this._buildGhost = this.add.graphics().setDepth(50);
 
     this.workers = [];
     this.selectedWorkers = [];
@@ -316,6 +325,7 @@ export default class GameScene extends Phaser.Scene {
         this.selectedWorkers.push(w);
       }
     }
+    this.workerPanel?.setVisible(this.selectedWorkers.length > 0);
     this.updateUnitCountHUD();
   }
 
@@ -323,6 +333,8 @@ export default class GameScene extends Phaser.Scene {
     this.selectedWorkers.forEach(w => w.setSelected(false));
     this.selectedWorkers = [];
     this._hideBuildingPanel();
+    this.workerPanel?.setVisible(false);
+    this._cancelBuildMode();
     this.updateUnitCountHUD();
   }
 
@@ -334,6 +346,8 @@ export default class GameScene extends Phaser.Scene {
   selectBuilding(building) {
     this.selectedWorkers.forEach(w => w.setSelected(false));
     this.selectedWorkers = [];
+    this.workerPanel?.setVisible(false);
+    this._cancelBuildMode();
     this.updateUnitCountHUD();
     this.selectedBuilding = building;
     this.buildingPanel.setVisible(true);
@@ -484,6 +498,7 @@ export default class GameScene extends Phaser.Scene {
     this.input.keyboard.on('keydown-T', () => {
       if (this.selectedBuilding === this.townHall) this.trainWorker();
     });
+    this.input.keyboard.on('keydown-ESC', () => { this._cancelBuildMode(); });
 
     this.input.on('pointerdown', this._onPointerDown, this);
     this.input.on('pointermove', this._onPointerMove, this);
@@ -496,13 +511,20 @@ export default class GameScene extends Phaser.Scene {
   }
 
   _isOverBuildingPanel(sx, sy) {
-    if (!this.buildingPanel?.visible || !this._buildingPanelBounds) return false;
-    const { x, y, w, h } = this._buildingPanelBounds;
-    return sx >= x && sx <= x + w && sy >= y && sy <= y + h;
+    if (this.buildingPanel?.visible && this._buildingPanelBounds) {
+      const { x, y, w, h } = this._buildingPanelBounds;
+      if (sx >= x && sx <= x + w && sy >= y && sy <= y + h) return true;
+    }
+    if (this.workerPanel?.visible && this._workerPanelBounds) {
+      const { x, y, w, h } = this._workerPanelBounds;
+      if (sx >= x && sx <= x + w && sy >= y && sy <= y + h) return true;
+    }
+    return false;
   }
 
   _onPointerDown(pointer) {
     if (pointer.rightButtonDown()) {
+      if (this._buildMode) { this._cancelBuildMode(); return; }
       if (this._isOverMinimap(pointer.x, pointer.y)) return;
       if (this.selectedBuilding === this.townHall) {
         this.setRallyPoint(pointer.worldX, pointer.worldY);
@@ -519,6 +541,12 @@ export default class GameScene extends Phaser.Scene {
 
     if (!pointer.leftButtonDown()) return;
     if (this._isOverMinimap(pointer.x, pointer.y)) return;
+
+    if (this._buildMode) {
+      this._tryPlaceBuilding(pointer.worldX, pointer.worldY);
+      return;
+    }
+
     if (this._isOverBuildingPanel(pointer.x, pointer.y)) return;
 
     // Building click check (before worker check so the building takes priority)
@@ -554,6 +582,7 @@ export default class GameScene extends Phaser.Scene {
   }
 
   _onPointerMove(pointer) {
+    if (this._buildMode) { this._updateBuildGhost(pointer.worldX, pointer.worldY); return; }
     if (!pointer.isDown || !pointer.leftButtonDown() || !this._dragStart) return;
 
     const dx = pointer.x - this._dragStart.sx;
@@ -628,7 +657,7 @@ export default class GameScene extends Phaser.Scene {
   // ─── Building panel ─────────────────────────────────────────────────────────
 
   buildBuildingPanel() {
-    const { width: W, height: H } = this.cameras.main;
+    const { height: H } = this.cameras.main;
     const PW = 284, PH = 142, PX = 8, PY = H - 48 - PH - 4;
 
     // Store bounds so _onPointerDown can ignore clicks inside the panel
@@ -696,6 +725,183 @@ export default class GameScene extends Phaser.Scene {
     btnZone.on('pointerdown', () => { if (this.buildingPanel.visible) this.trainWorker(); });
     btnZone.on('pointerover', () => { if (this.buildingPanel.visible) this._drawTrainBtn(true); });
     btnZone.on('pointerout',  () => { if (this.buildingPanel.visible) this._drawTrainBtn(false); });
+  }
+
+  buildWorkerPanel() {
+    const { height: H } = this.cameras.main;
+    const PW = 160, PH = 108, PX = 8, PY = H - 48 - PH - 4;
+    this._workerPanelBounds = { x: PX, y: PY, w: PW, h: PH };
+
+    this.workerPanel = this.add.container(0, 0).setScrollFactor(0).setDepth(205).setVisible(false);
+
+    const bg = this.add.graphics();
+    bg.fillStyle(0x1a1a2e, 0.93);
+    bg.fillRoundedRect(PX, PY, PW, PH, 6);
+    bg.lineStyle(1, 0x555588);
+    bg.strokeRoundedRect(PX, PY, PW, PH, 6);
+
+    const title = this.add.text(PX + 10, PY + 8, 'BUILD', {
+      fontSize: '13px', fontFamily: 'monospace', color: '#88ccff', fontStyle: 'bold',
+    });
+
+    const BTN_W = 52, BTN_H = 52;
+    const FARM_X = PX + 10, FARM_Y = PY + 30;
+    const BARR_X = FARM_X + BTN_W + 8, BARR_Y = FARM_Y;
+
+    this._farmBtnBg  = this.add.graphics();
+    this._barrBtnBg  = this.add.graphics();
+    this._drawWorkerBtn(this._farmBtnBg, FARM_X, FARM_Y, BTN_W, BTN_H, false);
+    this._drawWorkerBtn(this._barrBtnBg, BARR_X, BARR_Y, BTN_W, BTN_H, false);
+
+    const farmIcon = this.add.graphics();
+    farmIcon.fillStyle(0x5a9e5a, 0.8);
+    farmIcon.fillRect(FARM_X + 8, FARM_Y + 8, BTN_W - 16, BTN_H - 22);
+
+    const barrIcon = this.add.graphics();
+    barrIcon.fillStyle(0x8b3030, 0.8);
+    barrIcon.fillRect(BARR_X + 8, BARR_Y + 8, BTN_W - 16, BTN_H - 22);
+
+    const farmCost = this.add.text(FARM_X + BTN_W / 2, FARM_Y + BTN_H - 2, '500w', {
+      fontSize: '9px', fontFamily: 'monospace', color: '#8fbc8f',
+      stroke: '#000000', strokeThickness: 2,
+    }).setOrigin(0.5, 1);
+    const farmName = this.add.text(FARM_X + BTN_W / 2, FARM_Y + BTN_H + 3, 'Farm', {
+      fontSize: '9px', fontFamily: 'monospace', color: '#cccccc',
+    }).setOrigin(0.5, 0);
+    const farmKey = this.add.text(FARM_X + BTN_W - 2, FARM_Y + 2, 'F', {
+      fontSize: '8px', fontFamily: 'monospace', color: '#888888',
+    }).setOrigin(1, 0);
+
+    const barrCost = this.add.text(BARR_X + BTN_W / 2, BARR_Y + BTN_H - 2, '700g', {
+      fontSize: '9px', fontFamily: 'monospace', color: '#ffd700',
+      stroke: '#000000', strokeThickness: 2,
+    }).setOrigin(0.5, 1);
+    const barrName = this.add.text(BARR_X + BTN_W / 2, BARR_Y + BTN_H + 3, 'Barracks', {
+      fontSize: '9px', fontFamily: 'monospace', color: '#cccccc',
+    }).setOrigin(0.5, 0);
+    const barrKey = this.add.text(BARR_X + BTN_W - 2, BARR_Y + 2, 'B', {
+      fontSize: '8px', fontFamily: 'monospace', color: '#888888',
+    }).setOrigin(1, 0);
+
+    this.workerPanel.add([
+      bg, title,
+      this._farmBtnBg, farmIcon, farmCost, farmName, farmKey,
+      this._barrBtnBg, barrIcon, barrCost, barrName, barrKey,
+    ]);
+
+    const farmZone = this.add.zone(FARM_X + BTN_W / 2, FARM_Y + BTN_H / 2, BTN_W, BTN_H)
+      .setScrollFactor(0).setDepth(206).setInteractive();
+    farmZone.on('pointerdown', () => { if (this.workerPanel.visible) this.startBuildMode('farm'); });
+    farmZone.on('pointerover', () => { if (this.workerPanel.visible) this._drawWorkerBtn(this._farmBtnBg, FARM_X, FARM_Y, BTN_W, BTN_H, true); });
+    farmZone.on('pointerout',  () => { if (this.workerPanel.visible) this._drawWorkerBtn(this._farmBtnBg, FARM_X, FARM_Y, BTN_W, BTN_H, false); });
+
+    const barrZone = this.add.zone(BARR_X + BTN_W / 2, BARR_Y + BTN_H / 2, BTN_W, BTN_H)
+      .setScrollFactor(0).setDepth(206).setInteractive();
+    barrZone.on('pointerdown', () => { if (this.workerPanel.visible) this.startBuildMode('barracks'); });
+    barrZone.on('pointerover', () => { if (this.workerPanel.visible) this._drawWorkerBtn(this._barrBtnBg, BARR_X, BARR_Y, BTN_W, BTN_H, true); });
+    barrZone.on('pointerout',  () => { if (this.workerPanel.visible) this._drawWorkerBtn(this._barrBtnBg, BARR_X, BARR_Y, BTN_W, BTN_H, false); });
+
+    this.input.keyboard.on('keydown-F', () => {
+      if (this.workerPanel?.visible && this.selectedWorkers.length > 0) this.startBuildMode('farm');
+    });
+    this.input.keyboard.on('keydown-B', () => {
+      if (this.workerPanel?.visible && this.selectedWorkers.length > 0) this.startBuildMode('barracks');
+    });
+  }
+
+  _drawWorkerBtn(g, x, y, w, h, hovered) {
+    g.clear();
+    g.fillStyle(hovered ? 0x3a3a6e : 0x252540, 1);
+    g.fillRoundedRect(x, y, w, h, 4);
+    g.lineStyle(1, hovered ? 0x8888cc : 0x555580);
+    g.strokeRoundedRect(x, y, w, h, 4);
+  }
+
+  // ─── Build mode ──────────────────────────────────────────────────────────────
+
+  startBuildMode(type) {
+    this._buildMode = { type };
+    if (this._buildModeText) this._buildModeText.destroy();
+    const def = BUILDINGS[type];
+    const { width: W } = this.cameras.main;
+    this._buildModeText = this.add.text(W / 2, 16,
+      `Placing ${def.label}  (${def.goldCost ? def.goldCost + 'g' : ''}${def.woodCost ? def.woodCost + 'w' : ''})  — RMB or ESC to cancel`, {
+        fontSize: '11px', fontFamily: 'monospace', color: '#88ccff',
+        stroke: '#000000', strokeThickness: 2,
+        backgroundColor: '#00000099', padding: { x: 8, y: 4 },
+      }).setScrollFactor(0).setDepth(400).setOrigin(0.5, 0);
+  }
+
+  _cancelBuildMode() {
+    if (!this._buildMode) return;
+    this._buildMode = null;
+    this._buildGhost.clear();
+    this._buildModeText?.destroy();
+    this._buildModeText = null;
+  }
+
+  _isBuildLocationValid(tx, ty, w, h) {
+    for (let fy = 0; fy < h; fy++) {
+      for (let fx = 0; fx < w; fx++) {
+        const nx = tx + fx, ny = ty + fy;
+        if (nx < 0 || ny < 0 || nx >= MAP_WIDTH || ny >= MAP_HEIGHT) return false;
+        if (!WALKABLE.has(this.mapTiles[ny][nx])) return false;
+      }
+    }
+    return true;
+  }
+
+  _updateBuildGhost(wx, wy) {
+    const g = this._buildGhost;
+    g.clear();
+    if (!this._buildMode) return;
+    const def = BUILDINGS[this._buildMode.type];
+    const tx = Math.floor(wx / TILE_SIZE) - Math.floor(def.w / 2);
+    const ty = Math.floor(wy / TILE_SIZE) - Math.floor(def.h / 2);
+    const bx = tx * TILE_SIZE, by = ty * TILE_SIZE;
+    const bw = def.w * TILE_SIZE, bh = def.h * TILE_SIZE;
+    const valid = this._isBuildLocationValid(tx, ty, def.w, def.h);
+    g.fillStyle(def.color, valid ? 0.35 : 0.15);
+    g.fillRect(bx, by, bw, bh);
+    g.lineStyle(2, valid ? 0x00ff88 : 0xff4444, 0.9);
+    g.strokeRect(bx, by, bw, bh);
+  }
+
+  _tryPlaceBuilding(wx, wy) {
+    if (!this._buildMode) return;
+    const def = BUILDINGS[this._buildMode.type];
+    const tx = Math.floor(wx / TILE_SIZE) - Math.floor(def.w / 2);
+    const ty = Math.floor(wy / TILE_SIZE) - Math.floor(def.h / 2);
+
+    if (!this._isBuildLocationValid(tx, ty, def.w, def.h)) return;
+    if (this.gold < def.goldCost || this.wood < def.woodCost) {
+      this._showHarvestPopup(wx, wy, 'Not enough resources!', '#ff4444');
+      return;
+    }
+
+    this.gold -= def.goldCost;
+    this.wood -= def.woodCost;
+    this.updateResourceHUD();
+
+    for (let fy = 0; fy < def.h; fy++) {
+      for (let fx = 0; fx < def.w; fx++) {
+        this.mapTiles[ty + fy][tx + fx] = TERRAIN.BUILDING;
+      }
+    }
+
+    const bx = tx * TILE_SIZE, by = ty * TILE_SIZE;
+    const bw = def.w * TILE_SIZE, bh = def.h * TILE_SIZE;
+    const bg = this.add.graphics().setDepth(4);
+    bg.fillStyle(def.color, 1);
+    bg.fillRect(bx, by, bw, bh);
+    bg.lineStyle(2, 0xffffff, 0.4);
+    bg.strokeRect(bx, by, bw, bh);
+    this.add.text(bx + bw / 2, by + bh / 2, def.label, {
+      fontSize: '10px', fontFamily: 'monospace', color: '#ffffff',
+      stroke: '#000000', strokeThickness: 2,
+    }).setDepth(5).setOrigin(0.5, 0.5);
+
+    this._cancelBuildMode();
   }
 
   _drawTrainBtn(hovered) {

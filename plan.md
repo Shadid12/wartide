@@ -23,3 +23,7 @@ Workers should be able to collect gold.
 Make the tree generation more spread apart.
 
 Now remove the cyan line as I am done debuggin
+
+When I select a worker I should see building options. I can build a farm or a barrack.
+
+When I try to place a barrack it says not enough resource.
