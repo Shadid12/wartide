@@ -1,0 +1,1 @@
+I am creating an RTS game simmilar to warcraft 2. It will be 2d and playable in the browser. We are going to Phaser 3 for this. Create the basic structure. First create the map and the minimap. Create some terrians and resources also. we will have 3 resources just like warcraft 2. Gold, wood and oil.
