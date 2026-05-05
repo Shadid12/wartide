@@ -9,3 +9,7 @@ When the worker collects 20 woods he will go back to the town center to drop it 
 When workers collecting wood. The tree's wood amount should also reduce.
 
 When a tree has less than 1200 wood it will have the following sprite. Workers will be able to walk over this tile at this point.
+
+We need the functionality to add a rallying point from the townhall so the works rally in that point.
+
+when I unselect the town hall the rally flag will disappear from the map.

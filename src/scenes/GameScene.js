@@ -123,6 +123,11 @@ export default class GameScene extends Phaser.Scene {
     // Move marker (world space, fades out)
     this.moveMarker = this.add.graphics().setDepth(6);
 
+    // Rally point state
+    this.rallyPoint  = null; // { wx, wy }
+    this.rallyMarker = this.add.graphics().setDepth(6);
+    this.rallyLine   = this.add.graphics().setDepth(2);
+
     this.spawnWorkers();
     this.setupInput();
 
@@ -466,6 +471,10 @@ export default class GameScene extends Phaser.Scene {
   _onPointerDown(pointer) {
     if (pointer.rightButtonDown()) {
       if (this._isOverMinimap(pointer.x, pointer.y)) return;
+      if (this.selectedBuilding === this.townHall) {
+        this.setRallyPoint(pointer.worldX, pointer.worldY);
+        return;
+      }
       const res = this._resourceAtWorldPoint(pointer.worldX, pointer.worldY);
       if (res && this.selectedWorkers.length > 0) {
         this.issueHarvest(res);
@@ -710,12 +719,48 @@ export default class GameScene extends Phaser.Scene {
           const nx = cx + dx, ny = cy + dy;
           if (nx < 0 || ny < 0 || nx >= MAP_WIDTH || ny >= MAP_HEIGHT) continue;
           if (!WALKABLE.has(this.mapTiles[ny][nx])) continue;
-          this.workers.push(new Worker(this, nx * TILE_SIZE + TILE_SIZE / 2, ny * TILE_SIZE + TILE_SIZE / 2));
+          const worker = new Worker(this, nx * TILE_SIZE + TILE_SIZE / 2, ny * TILE_SIZE + TILE_SIZE / 2);
+          this.workers.push(worker);
           this.updateUnitCountHUD();
+          if (this.rallyPoint) worker.moveTo(this.rallyPoint.wx, this.rallyPoint.wy);
           return;
         }
       }
     }
+  }
+
+  // ─── Rally point ─────────────────────────────────────────────────────────────
+
+  setRallyPoint(wx, wy) {
+    this.rallyPoint = { wx, wy };
+    this.showMoveMarker(wx, wy);
+  }
+
+  _drawRallyMarker() {
+    const g = this.rallyMarker;
+    g.clear();
+    if (!this.rallyPoint || this.selectedBuilding !== this.townHall) return;
+    const { wx, wy } = this.rallyPoint;
+    // Flagpole
+    g.lineStyle(2, 0xffd700, 1);
+    g.lineBetween(wx, wy, wx, wy - 22);
+    // Flag triangle
+    g.fillStyle(0xffd700, 1);
+    g.fillTriangle(wx, wy - 22, wx + 13, wy - 16, wx, wy - 10);
+    // Base
+    g.lineStyle(2, 0xffd700, 0.7);
+    g.strokeCircle(wx, wy, 4);
+  }
+
+  _drawRallyLine() {
+    const g = this.rallyLine;
+    g.clear();
+    if (!this.rallyPoint || this.selectedBuilding !== this.townHall || !this.townHall) return;
+    const th = this.townHall;
+    const tx = (th.tileX + 1.5) * TILE_SIZE;
+    const ty = (th.tileY + 1.5) * TILE_SIZE;
+    g.lineStyle(1, 0xffd700, 0.4);
+    g.lineBetween(tx, ty, this.rallyPoint.wx, this.rallyPoint.wy);
   }
 
   _hitTestTownHall(wx, wy) {
@@ -913,6 +958,8 @@ export default class GameScene extends Phaser.Scene {
 
     for (const w of this.workers) w.update(delta);
     this.drawSelectionRings();
+    this._drawRallyMarker();
+    this._drawRallyLine();
     this.updateMinimapViewport();
     this.updateBuildingPanel();
   }
