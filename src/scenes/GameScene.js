@@ -128,7 +128,6 @@ export default class GameScene extends Phaser.Scene {
   }
 
   buildResourceLayer() {
-    this.resourceSprites = [];
     for (const res of this.mapResources) {
       const sprite = this.add.image(
         res.x * TILE_SIZE + TILE_SIZE / 2,
@@ -137,7 +136,7 @@ export default class GameScene extends Phaser.Scene {
       ).setDepth(1).setInteractive();
       sprite.on('pointerover', () => this.showResourceTooltip(res, sprite));
       sprite.on('pointerout',  () => this.hideResourceTooltip());
-      this.resourceSprites.push(sprite);
+      res.sprite = sprite; // attach sprite directly for easy cleanup
     }
   }
 
@@ -220,9 +219,9 @@ export default class GameScene extends Phaser.Scene {
     const cx = Math.floor(MAP_WIDTH  / 2);
     const cy = Math.floor(MAP_HEIGHT / 2);
 
-    // Find nearby walkable tiles starting from center
+    // Find walkable tiles starting well outside the townhall visual area
     const placed = [];
-    for (let r = 0; r < 20 && placed.length < WORKER_COUNT; r++) {
+    for (let r = 8; r < 30 && placed.length < WORKER_COUNT; r++) {
       for (let dy = -r; dy <= r && placed.length < WORKER_COUNT; dy++) {
         for (let dx = -r; dx <= r && placed.length < WORKER_COUNT; dx++) {
           if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue; // only ring
@@ -297,6 +296,69 @@ export default class GameScene extends Phaser.Scene {
     this.showMoveMarker(worldX, worldY);
   }
 
+  // ─── Resource harvesting ────────────────────────────────────────────────────
+
+  _resourceAtWorldPoint(wx, wy) {
+    for (const res of this.mapResources) {
+      const rx = res.x * TILE_SIZE + TILE_SIZE / 2;
+      const ry = res.y * TILE_SIZE + TILE_SIZE / 2;
+      const dx = wx - rx, dy = wy - ry;
+      if (dx * dx + dy * dy < (TILE_SIZE * 0.8) ** 2) return res;
+    }
+    return null;
+  }
+
+  issueHarvest(resource) {
+    for (const w of this.selectedWorkers) w.harvestResource(resource);
+    this.showMoveMarker(
+      resource.x * TILE_SIZE + TILE_SIZE / 2,
+      resource.y * TILE_SIZE + TILE_SIZE / 2,
+    );
+  }
+
+  onWorkerHarvest(worker, resource, amount) {
+    if (!resource || resource.amount <= 0) {
+      worker._cancelHarvest();
+      return;
+    }
+
+    const collected = Math.min(amount, resource.amount);
+    resource.amount -= collected;
+
+    if (resource.type === RESOURCE.WOOD)  this.wood += collected;
+    else if (resource.type === RESOURCE.GOLD) this.gold += collected;
+    else if (resource.type === RESOURCE.OIL)  this.oil  += collected;
+
+    this.updateResourceHUD();
+    this._showHarvestPopup(worker.x, worker.y, `+${collected} ${resource.type}`);
+
+    if (resource.amount <= 0) {
+      resource.sprite?.destroy();
+      const idx = this.mapResources.indexOf(resource);
+      if (idx !== -1) this.mapResources.splice(idx, 1);
+      // Stop every worker that was collecting this resource
+      for (const w of this.workers) {
+        if (w._harvestTarget === resource) w._cancelHarvest();
+      }
+    }
+  }
+
+  _showHarvestPopup(wx, wy, text) {
+    const t = this.add.text(wx, wy - 20, text, {
+      fontSize: '12px', fontFamily: 'monospace',
+      color: '#00ff88', stroke: '#000000', strokeThickness: 2,
+    }).setDepth(10).setOrigin(0.5, 1);
+
+    this.tweens.add({
+      targets: t,
+      y: wy - 50,
+      alpha: 0,
+      duration: 1200,
+      ease: 'Quad.Out',
+      onComplete: () => t.destroy(),
+    });
+  }
+
   // ─── Input ──────────────────────────────────────────────────────────────────
 
   setupInput() {
@@ -342,9 +404,13 @@ export default class GameScene extends Phaser.Scene {
 
   _onPointerDown(pointer) {
     if (pointer.rightButtonDown()) {
-      // Right-click: move command (ignore minimap area)
       if (this._isOverMinimap(pointer.x, pointer.y)) return;
-      this.issueMove(pointer.worldX, pointer.worldY);
+      const res = this._resourceAtWorldPoint(pointer.worldX, pointer.worldY);
+      if (res && this.selectedWorkers.length > 0) {
+        this.issueHarvest(res);
+      } else {
+        this.issueMove(pointer.worldX, pointer.worldY);
+      }
       return;
     }
 

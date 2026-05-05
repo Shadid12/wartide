@@ -1,3 +1,6 @@
 I am creating an RTS game simmilar to warcraft 2. It will be 2d and playable in the browser. We are going to Phaser 3 for this. Create the basic structure. First create the map and the minimap. Create some terrians and resources also. we will have 3 resources just like warcraft 2. Gold, wood and oil.
 
 Next let's add some units. We will add only workers unit for now. Workers should be selectable. Player can select multiple workers at once. And you can point and click in the map to mave the workers. 
+
+workers should have the ability to collect resources. When you select a worker or multiple workers you can click on a resourse like tree and the worker will start collecting it. A worker takes 10 seconds to collect 20 wood from a tree.
+

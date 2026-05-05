@@ -97,7 +97,7 @@ export function generateMap(seed = Math.floor(Math.random() * 10000)) {
       const terrain = tiles[y][x];
       const rn = resourceNoise.noise(x * 0.3, y * 0.3) * 0.5 + 0.5;
 
-      if (terrain === TERRAIN.FOREST && rn > 0.72) {
+      if (terrain === TERRAIN.FOREST) {
         resources.push({ x, y, type: RESOURCE.WOOD, amount: 1000 + Math.floor(rn * 500) });
       } else if ((terrain === TERRAIN.MOUNTAIN || terrain === TERRAIN.DARK_GRASS) && rn > 0.80) {
         resources.push({ x, y, type: RESOURCE.GOLD, amount: 2000 + Math.floor(rn * 3000) });
