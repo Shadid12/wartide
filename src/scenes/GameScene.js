@@ -44,6 +44,14 @@ export default class GameScene extends Phaser.Scene {
       frameWidth: 192,
       frameHeight: 256,
     });
+    this.load.spritesheet('worker_axe', 'assets/sprites/worker/worker_Interact_Axe.png', {
+      frameWidth: 192,
+      frameHeight: 192,
+    });
+    this.load.spritesheet('worker_run_wood', 'assets/sprites/worker/worker_run_wood.png', {
+      frameWidth: 192,
+      frameHeight: 192,
+    });
     this.load.image('townhall', 'assets/sprites/townhall/town.png');
   }
 
@@ -59,6 +67,18 @@ export default class GameScene extends Phaser.Scene {
     this.anims.create({
       key: 'worker_run',
       frames: this.anims.generateFrameNumbers('worker_run', { start: 0, end: 5 }),
+      frameRate: 10,
+      repeat: -1,
+    });
+    this.anims.create({
+      key: 'worker_axe',
+      frames: this.anims.generateFrameNumbers('worker_axe', { start: 0, end: 5 }),
+      frameRate: 8,
+      repeat: -1,
+    });
+    this.anims.create({
+      key: 'worker_run_wood',
+      frames: this.anims.generateFrameNumbers('worker_run_wood', { start: 0, end: 5 }),
       frameRate: 10,
       repeat: -1,
     });
@@ -316,31 +336,44 @@ export default class GameScene extends Phaser.Scene {
     );
   }
 
+  // Called when worker finishes a chop cycle. Deducts from the resource and
+  // returns how much was actually collected. HUD update happens at dropoff.
   onWorkerHarvest(worker, resource, amount) {
     if (!resource || resource.amount <= 0) {
       worker._cancelHarvest();
-      return;
+      return 0;
     }
 
     const collected = Math.min(amount, resource.amount);
     resource.amount -= collected;
 
-    if (resource.type === RESOURCE.WOOD)  this.wood += collected;
-    else if (resource.type === RESOURCE.GOLD) this.gold += collected;
-    else if (resource.type === RESOURCE.OIL)  this.oil  += collected;
-
-    this.updateResourceHUD();
-    this._showHarvestPopup(worker.x, worker.y, `+${collected} ${resource.type}`);
-
     if (resource.amount <= 0) {
       resource.sprite?.destroy();
       const idx = this.mapResources.indexOf(resource);
       if (idx !== -1) this.mapResources.splice(idx, 1);
-      // Stop every worker that was collecting this resource
+      // Cancel all other workers targeting this depleted resource
       for (const w of this.workers) {
-        if (w._harvestTarget === resource) w._cancelHarvest();
+        if (w !== worker && w._harvestTarget === resource) w._cancelHarvest();
       }
+      // Clear the current worker's target so they don't return after dropoff
+      worker._harvestTarget = null;
     }
+
+    return collected;
+  }
+
+  // Called when a worker arrives back at the townhall with carried resources.
+  onWorkerDropoff(worker, amount, type) {
+    if (type === RESOURCE.WOOD)       this.wood += amount;
+    else if (type === RESOURCE.GOLD)  this.gold += amount;
+    else if (type === RESOURCE.OIL)   this.oil  += amount;
+
+    this.updateResourceHUD();
+
+    const th = this.townHall;
+    const px = th ? (th.tileX + 1.5) * TILE_SIZE : worker.x;
+    const py = th ? th.tileY * TILE_SIZE - 20      : worker.y;
+    this._showHarvestPopup(px, py, `+${amount} ${type}`);
   }
 
   _showHarvestPopup(wx, wy, text) {

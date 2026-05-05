@@ -21,9 +21,11 @@ export default class Worker {
     this._pathIdx = 0;
 
     // Harvest state
-    this._harvestTarget = null;  // resource object being collected
-    this._harvesting    = false;
-    this._harvestTimer  = 0;
+    this._harvestTarget      = null;  // resource object being collected
+    this._harvesting         = false;
+    this._harvestTimer       = 0;
+    this._carrying           = null;  // { amount, type } while walking back to dropoff
+    this._returningToDropoff = false;
 
     this.sprite = scene.add.sprite(x, y, 'worker_idle')
       .setDepth(5)
@@ -34,7 +36,7 @@ export default class Worker {
 
   // ─── Navigation ─────────────────────────────────────────────────────────────
 
-  _navigateTo(endTX, endTY) {
+  _navigateTo(endTX, endTY, anim = 'worker_run') {
     const tiles  = this.scene.mapTiles;
     const startTX = Math.floor(this.x / TILE_SIZE);
     const startTY = Math.floor(this.y / TILE_SIZE);
@@ -51,8 +53,8 @@ export default class Worker {
 
     if (!this.moving) {
       this.moving = true;
-      this.sprite.play('worker_run');
     }
+    this.sprite.play(anim);
   }
 
   moveTo(wx, wy) {
@@ -70,10 +72,19 @@ export default class Worker {
   }
 
   _cancelHarvest() {
-    this._harvestTarget = null;
-    this._harvesting    = false;
-    this._harvestTimer  = 0;
-    this.sprite.clearTint();
+    this._harvestTarget      = null;
+    this._harvesting         = false;
+    this._harvestTimer       = 0;
+    this._carrying           = null;
+    this._returningToDropoff = false;
+    this.sprite.play('worker_idle');
+  }
+
+  _navigateToDropoff() {
+    const th = this.scene.townHall;
+    if (!th) return;
+    // Navigate to townhall center tile; pathfinder redirects to nearest walkable edge
+    this._navigateTo(th.tileX + 1, th.tileY + 1, 'worker_run_wood');
   }
 
   _tryBeginHarvest() {
@@ -85,9 +96,9 @@ export default class Worker {
     if (Math.sqrt(dx * dx + dy * dy) <= HARVEST_RANGE) {
       this._harvesting   = true;
       this._harvestTimer = 0;
-      this.sprite.setTint(0xaaddaa); // green tint = busy collecting
+      this.sprite.play('worker_axe');
     } else {
-      this._cancelHarvest(); // pathfinder couldn't get close enough
+      this._cancelHarvest();
     }
   }
 
@@ -108,7 +119,27 @@ export default class Worker {
       this._harvestTimer += delta;
       if (this._harvestTimer >= HARVEST_DURATION) {
         this._harvestTimer -= HARVEST_DURATION;
-        this.scene.onWorkerHarvest(this, this._harvestTarget, HARVEST_AMOUNT);
+        const resourceRef = this._harvestTarget;
+        const collected   = this.scene.onWorkerHarvest(this, resourceRef, HARVEST_AMOUNT);
+        if (collected > 0) {
+          this._carrying           = { amount: collected, type: resourceRef.type };
+          this._harvesting         = false;
+          this._returningToDropoff = true;
+          this._navigateToDropoff();
+        }
+      }
+      return;
+    }
+
+    // ── Arrived at dropoff ──
+    if (!this.moving && this._returningToDropoff) {
+      this.scene.onWorkerDropoff(this, this._carrying.amount, this._carrying.type);
+      this._carrying           = null;
+      this._returningToDropoff = false;
+      if (this._harvestTarget) {
+        this._navigateTo(this._harvestTarget.x, this._harvestTarget.y);
+      } else {
+        this.sprite.play('worker_idle');
       }
       return;
     }
