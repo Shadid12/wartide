@@ -74,6 +74,7 @@ export default class GameScene extends Phaser.Scene {
     this.load.image('townhall', 'assets/sprites/townhall/town.png');
     this.load.image('stump', 'assets/sprites/trees/Stump_1.png');
     this.load.image('tower_icon', 'assets/sprites/tower/Tower.png');
+    this.load.image('tower_half', 'assets/sprites/tower/tower_half.png');
   }
 
   create() {
@@ -581,13 +582,12 @@ export default class GameScene extends Phaser.Scene {
 
     if (!pointer.leftButtonDown()) return;
     if (this._isOverMinimap(pointer.x, pointer.y)) return;
+    if (this._isOverBuildingPanel(pointer.x, pointer.y)) return;
 
     if (this._buildMode) {
       this._tryPlaceBuilding(pointer.worldX, pointer.worldY);
       return;
     }
-
-    if (this._isOverBuildingPanel(pointer.x, pointer.y)) return;
 
     // Building click check (before worker check so the building takes priority)
     if (this._hitTestTownHall(pointer.worldX, pointer.worldY)) {
@@ -955,7 +955,7 @@ export default class GameScene extends Phaser.Scene {
       stroke: '#000000', strokeThickness: 2,
     }).setDepth(5).setOrigin(0.5, 1);
 
-    const site = { tx, ty, type: this._buildMode.type, def, timeBuilt: 0, ghost, progressBar, progressText, complete: false };
+    const site = { tx, ty, type: this._buildMode.type, def, timeBuilt: 0, ghost, progressBar, progressText, halfSprite: null, complete: false };
     this.constructionSites.push(site);
 
     // Send all selected workers to build
@@ -980,6 +980,13 @@ export default class GameScene extends Phaser.Scene {
     site.progressBar.fillRect(bx, by - 8, bw * progress, 5);
     site.progressText.setText(`${site.def.label}: ${remaining}s`);
 
+    if (site.type === 'tower' && progress >= 0.4 && !site.halfSprite) {
+      site.ghost.setVisible(false);
+      const bh = site.def.h * TILE_SIZE;
+      site.halfSprite = this.add.image(bx + bw / 2, by + bh / 2, 'tower_half')
+        .setDisplaySize(bw, bh).setDepth(4);
+    }
+
     if (site.timeBuilt >= site.def.buildTime) {
       this._completeBuild(site);
       return true;
@@ -1001,6 +1008,7 @@ export default class GameScene extends Phaser.Scene {
     }
 
     site.ghost.destroy();
+    if (site.halfSprite) site.halfSprite.destroy();
     site.progressBar.destroy();
     site.progressText.destroy();
 
