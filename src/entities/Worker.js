@@ -27,6 +27,10 @@ export default class Worker {
     this._carrying           = null;  // { amount, type } while walking back to dropoff
     this._returningToDropoff = false;
 
+    // Build state
+    this._buildSite = null;
+    this._building  = false;
+
     this.sprite = scene.add.sprite(x, y, 'worker_idle')
       .setDepth(5)
       .setOrigin(0.5, 0.6)
@@ -59,16 +63,52 @@ export default class Worker {
 
   moveTo(wx, wy) {
     this._cancelHarvest();
+    this._cancelBuild();
     this._navigateTo(Math.floor(wx / TILE_SIZE), Math.floor(wy / TILE_SIZE));
   }
 
   // ─── Harvesting ─────────────────────────────────────────────────────────────
 
   harvestResource(resource) {
+    this._cancelBuild();
     this._harvestTarget  = resource;
     this._harvesting     = false;
     this._harvestTimer   = 0;
     this._navigateTo(resource.x, resource.y);
+  }
+
+  buildAt(site) {
+    this._cancelHarvest();
+    this._buildSite = site;
+    this._building  = false;
+    // Navigate to tile just below the site footprint
+    const navX = site.tx + Math.floor(site.def.w / 2);
+    const navY = site.ty + site.def.h;
+    this._navigateTo(navX, navY);
+  }
+
+  _cancelBuild() {
+    const wasBusy = this._building;
+    this._buildSite = null;
+    this._building  = false;
+    if (wasBusy) this.sprite.play('worker_idle');
+  }
+
+  _tryBeginBuild() {
+    const site = this._buildSite;
+    if (!site || site.complete) { this._cancelBuild(); return; }
+    // Distance from worker to nearest point on site bounding box
+    const sL = site.tx * TILE_SIZE,  sR = (site.tx + site.def.w) * TILE_SIZE;
+    const sT = site.ty * TILE_SIZE,  sB = (site.ty + site.def.h) * TILE_SIZE;
+    const nearX = Math.max(sL, Math.min(this.x, sR));
+    const nearY = Math.max(sT, Math.min(this.y, sB));
+    const dist  = Math.sqrt((this.x - nearX) ** 2 + (this.y - nearY) ** 2);
+    if (dist <= TILE_SIZE * 1.5) {
+      this._building = true;
+      this.sprite.play('worker_axe');
+    } else {
+      this._cancelBuild();
+    }
   }
 
   _cancelHarvest() {
@@ -115,6 +155,17 @@ export default class Worker {
   // ─── Per-frame update ───────────────────────────────────────────────────────
 
   update(delta) {
+    // ── Building phase ──
+    if (this._building) {
+      const done = this.scene.onWorkerBuildTick(this, this._buildSite, delta);
+      if (done) {
+        this._building  = false;
+        this._buildSite = null;
+        this.sprite.play('worker_idle');
+      }
+      return;
+    }
+
     // ── Harvesting phase ──
     if (this._harvesting) {
       this._harvestTimer += delta;
@@ -145,9 +196,10 @@ export default class Worker {
       return;
     }
 
-    // ── Arrived: check if we should begin harvesting ──
+    // ── Arrived: check if we should begin harvesting or building ──
     if (!this.moving) {
       if (this._harvestTarget) this._tryBeginHarvest();
+      else if (this._buildSite)  this._tryBeginBuild();
       return;
     }
 

@@ -27,3 +27,10 @@ Now remove the cyan line as I am done debuggin
 When I select a worker I should see building options. I can build a farm or a barrack.
 
 When I try to place a barrack it says not enough resource.
+
+Add a third type of building Tower. 
+
+When worker is building a building the worker needs to go near that area. It will take 60 seconds to build a Tower
+for the worker
+
+Let's make Tower a new entity.

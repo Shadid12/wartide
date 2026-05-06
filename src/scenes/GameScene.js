@@ -3,6 +3,7 @@ import { generateMap } from '../utils/MapGenerator.js';
 import { createTileTextures } from '../utils/TextureFactory.js';
 import Worker from '../entities/Worker.js';
 import TownHall, { TOWNHALL_FOOTPRINT, TOWNHALL_BLOCK, TRAIN_COST } from '../entities/TownHall.js';
+import Tower from '../entities/Tower.js';
 import {
   TILE_SIZE, MAP_WIDTH, MAP_HEIGHT,
   MINIMAP_WIDTH, MINIMAP_HEIGHT, MINIMAP_X, MINIMAP_Y,
@@ -17,8 +18,9 @@ const WORKER_COUNT = 2;
 const FORMATION_SPACING = 44;   // px between workers in move formation
 
 const BUILDINGS = {
-  farm:     { w: 2, h: 2, goldCost: 0,   woodCost: 500, color: 0x5a9e5a, label: 'Farm' },
-  barracks: { w: 3, h: 3, goldCost: 700, woodCost: 0,   color: 0x8b3030, label: 'Barracks' },
+  farm:     { w: 2, h: 2, goldCost: 0,   woodCost: 500, color: 0x5a9e5a, label: 'Farm',     buildTime: 30000 },
+  barracks: { w: 3, h: 3, goldCost: 700, woodCost: 0,   color: 0x8b3030, label: 'Barracks', buildTime: 45000 },
+  tower:    { w: 2, h: 2, goldCost: 500, woodCost: 0,   color: 0x6a6a8e, label: 'Tower',    buildTime: 60000 },
 };
 
 function formationPositions(cx, cy, count) {
@@ -67,6 +69,7 @@ export default class GameScene extends Phaser.Scene {
     });
     this.load.image('townhall', 'assets/sprites/townhall/town.png');
     this.load.image('stump', 'assets/sprites/trees/Stump_1.png');
+    this.load.image('tower_icon', 'assets/sprites/tower/Tower.png');
   }
 
   create() {
@@ -137,8 +140,11 @@ export default class GameScene extends Phaser.Scene {
     this.buildBuildingPanel();
     this.buildWorkerPanel();
 
-    this._buildMode = null;
-    this._buildGhost = this.add.graphics().setDepth(50);
+    this._buildMode     = null;
+    this._buildGhost    = this.add.graphics().setDepth(50);
+    this.constructionSites = [];
+    this._reservedTiles    = new Set();
+    this.towers            = [];
 
     this.workers = [];
     this.selectedWorkers = [];
@@ -729,7 +735,9 @@ export default class GameScene extends Phaser.Scene {
 
   buildWorkerPanel() {
     const { height: H } = this.cameras.main;
-    const PW = 160, PH = 108, PX = 8, PY = H - 48 - PH - 4;
+    const BTN_W = 52, BTN_H = 52, GAP = 8, PAD = 10;
+    const PW = PAD + BTN_W + GAP + BTN_W + GAP + BTN_W + PAD; // 3 buttons
+    const PH = 108, PX = 8, PY = H - 48 - PH - 4;
     this._workerPanelBounds = { x: PX, y: PY, w: PW, h: PH };
 
     this.workerPanel = this.add.container(0, 0).setScrollFactor(0).setDepth(205).setVisible(false);
@@ -740,72 +748,77 @@ export default class GameScene extends Phaser.Scene {
     bg.lineStyle(1, 0x555588);
     bg.strokeRoundedRect(PX, PY, PW, PH, 6);
 
-    const title = this.add.text(PX + 10, PY + 8, 'BUILD', {
+    const title = this.add.text(PX + PAD, PY + 8, 'BUILD', {
       fontSize: '13px', fontFamily: 'monospace', color: '#88ccff', fontStyle: 'bold',
     });
 
-    const BTN_W = 52, BTN_H = 52;
-    const FARM_X = PX + 10, FARM_Y = PY + 30;
-    const BARR_X = FARM_X + BTN_W + 8, BARR_Y = FARM_Y;
+    const FARM_X  = PX + PAD;
+    const BARR_X  = FARM_X + BTN_W + GAP;
+    const TOWER_X = BARR_X + BTN_W + GAP;
+    const BTN_Y   = PY + 30;
 
     this._farmBtnBg  = this.add.graphics();
     this._barrBtnBg  = this.add.graphics();
-    this._drawWorkerBtn(this._farmBtnBg, FARM_X, FARM_Y, BTN_W, BTN_H, false);
-    this._drawWorkerBtn(this._barrBtnBg, BARR_X, BARR_Y, BTN_W, BTN_H, false);
+    this._towerBtnBg = this.add.graphics();
+    this._drawWorkerBtn(this._farmBtnBg,  FARM_X,  BTN_Y, BTN_W, BTN_H, false);
+    this._drawWorkerBtn(this._barrBtnBg,  BARR_X,  BTN_Y, BTN_W, BTN_H, false);
+    this._drawWorkerBtn(this._towerBtnBg, TOWER_X, BTN_Y, BTN_W, BTN_H, false);
 
-    const farmIcon = this.add.graphics();
-    farmIcon.fillStyle(0x5a9e5a, 0.8);
-    farmIcon.fillRect(FARM_X + 8, FARM_Y + 8, BTN_W - 16, BTN_H - 22);
+    const makeIcon = (x, color) => {
+      const g = this.add.graphics();
+      g.fillStyle(color, 0.8);
+      g.fillRect(x + 8, BTN_Y + 8, BTN_W - 16, BTN_H - 22);
+      return g;
+    };
+    const farmIcon  = makeIcon(FARM_X, 0x5a9e5a);
+    const barrIcon  = makeIcon(BARR_X, 0x8b3030);
+    const towerIcon = this.add.image(TOWER_X + BTN_W / 2, BTN_Y + BTN_H / 2 - 4, 'tower_icon')
+      .setDisplaySize(36, 36)
+      .setOrigin(0.5, 0.5);
 
-    const barrIcon = this.add.graphics();
-    barrIcon.fillStyle(0x8b3030, 0.8);
-    barrIcon.fillRect(BARR_X + 8, BARR_Y + 8, BTN_W - 16, BTN_H - 22);
+    const makeLabel = (x, cost, costColor, name, key) => [
+      this.add.text(x + BTN_W / 2, BTN_Y + BTN_H - 2, cost, {
+        fontSize: '9px', fontFamily: 'monospace', color: costColor,
+        stroke: '#000000', strokeThickness: 2,
+      }).setOrigin(0.5, 1),
+      this.add.text(x + BTN_W / 2, BTN_Y + BTN_H + 3, name, {
+        fontSize: '9px', fontFamily: 'monospace', color: '#cccccc',
+      }).setOrigin(0.5, 0),
+      this.add.text(x + BTN_W - 2, BTN_Y + 2, key, {
+        fontSize: '8px', fontFamily: 'monospace', color: '#888888',
+      }).setOrigin(1, 0),
+    ];
 
-    const farmCost = this.add.text(FARM_X + BTN_W / 2, FARM_Y + BTN_H - 2, '500w', {
-      fontSize: '9px', fontFamily: 'monospace', color: '#8fbc8f',
-      stroke: '#000000', strokeThickness: 2,
-    }).setOrigin(0.5, 1);
-    const farmName = this.add.text(FARM_X + BTN_W / 2, FARM_Y + BTN_H + 3, 'Farm', {
-      fontSize: '9px', fontFamily: 'monospace', color: '#cccccc',
-    }).setOrigin(0.5, 0);
-    const farmKey = this.add.text(FARM_X + BTN_W - 2, FARM_Y + 2, 'F', {
-      fontSize: '8px', fontFamily: 'monospace', color: '#888888',
-    }).setOrigin(1, 0);
-
-    const barrCost = this.add.text(BARR_X + BTN_W / 2, BARR_Y + BTN_H - 2, '700g', {
-      fontSize: '9px', fontFamily: 'monospace', color: '#ffd700',
-      stroke: '#000000', strokeThickness: 2,
-    }).setOrigin(0.5, 1);
-    const barrName = this.add.text(BARR_X + BTN_W / 2, BARR_Y + BTN_H + 3, 'Barracks', {
-      fontSize: '9px', fontFamily: 'monospace', color: '#cccccc',
-    }).setOrigin(0.5, 0);
-    const barrKey = this.add.text(BARR_X + BTN_W - 2, BARR_Y + 2, 'B', {
-      fontSize: '8px', fontFamily: 'monospace', color: '#888888',
-    }).setOrigin(1, 0);
+    const farmLabels  = makeLabel(FARM_X,  '500w', '#8fbc8f', 'Farm',     'F');
+    const barrLabels  = makeLabel(BARR_X,  '700g', '#ffd700', 'Barracks', 'B');
+    const towerLabels = makeLabel(TOWER_X, '500g', '#ffd700', 'Tower',    'G');
 
     this.workerPanel.add([
       bg, title,
-      this._farmBtnBg, farmIcon, farmCost, farmName, farmKey,
-      this._barrBtnBg, barrIcon, barrCost, barrName, barrKey,
+      this._farmBtnBg, farmIcon, ...farmLabels,
+      this._barrBtnBg, barrIcon, ...barrLabels,
+      this._towerBtnBg, towerIcon, ...towerLabels,
     ]);
 
-    const farmZone = this.add.zone(FARM_X + BTN_W / 2, FARM_Y + BTN_H / 2, BTN_W, BTN_H)
-      .setScrollFactor(0).setDepth(206).setInteractive();
-    farmZone.on('pointerdown', () => { if (this.workerPanel.visible) this.startBuildMode('farm'); });
-    farmZone.on('pointerover', () => { if (this.workerPanel.visible) this._drawWorkerBtn(this._farmBtnBg, FARM_X, FARM_Y, BTN_W, BTN_H, true); });
-    farmZone.on('pointerout',  () => { if (this.workerPanel.visible) this._drawWorkerBtn(this._farmBtnBg, FARM_X, FARM_Y, BTN_W, BTN_H, false); });
-
-    const barrZone = this.add.zone(BARR_X + BTN_W / 2, BARR_Y + BTN_H / 2, BTN_W, BTN_H)
-      .setScrollFactor(0).setDepth(206).setInteractive();
-    barrZone.on('pointerdown', () => { if (this.workerPanel.visible) this.startBuildMode('barracks'); });
-    barrZone.on('pointerover', () => { if (this.workerPanel.visible) this._drawWorkerBtn(this._barrBtnBg, BARR_X, BARR_Y, BTN_W, BTN_H, true); });
-    barrZone.on('pointerout',  () => { if (this.workerPanel.visible) this._drawWorkerBtn(this._barrBtnBg, BARR_X, BARR_Y, BTN_W, BTN_H, false); });
+    const makeZone = (x, type, btnBg) => {
+      const zone = this.add.zone(x + BTN_W / 2, BTN_Y + BTN_H / 2, BTN_W, BTN_H)
+        .setScrollFactor(0).setDepth(206).setInteractive();
+      zone.on('pointerdown', () => { if (this.workerPanel.visible) this.startBuildMode(type); });
+      zone.on('pointerover', () => { if (this.workerPanel.visible) this._drawWorkerBtn(btnBg, x, BTN_Y, BTN_W, BTN_H, true); });
+      zone.on('pointerout',  () => { if (this.workerPanel.visible) this._drawWorkerBtn(btnBg, x, BTN_Y, BTN_W, BTN_H, false); });
+    };
+    makeZone(FARM_X,  'farm',     this._farmBtnBg);
+    makeZone(BARR_X,  'barracks', this._barrBtnBg);
+    makeZone(TOWER_X, 'tower',    this._towerBtnBg);
 
     this.input.keyboard.on('keydown-F', () => {
       if (this.workerPanel?.visible && this.selectedWorkers.length > 0) this.startBuildMode('farm');
     });
     this.input.keyboard.on('keydown-B', () => {
       if (this.workerPanel?.visible && this.selectedWorkers.length > 0) this.startBuildMode('barracks');
+    });
+    this.input.keyboard.on('keydown-G', () => {
+      if (this.workerPanel?.visible && this.selectedWorkers.length > 0) this.startBuildMode('tower');
     });
   }
 
@@ -846,6 +859,7 @@ export default class GameScene extends Phaser.Scene {
         const nx = tx + fx, ny = ty + fy;
         if (nx < 0 || ny < 0 || nx >= MAP_WIDTH || ny >= MAP_HEIGHT) return false;
         if (!WALKABLE.has(this.mapTiles[ny][nx])) return false;
+        if (this._reservedTiles.has(`${nx},${ny}`)) return false;
       }
     }
     return true;
@@ -883,25 +897,96 @@ export default class GameScene extends Phaser.Scene {
     this.wood -= def.woodCost;
     this.updateResourceHUD();
 
+    // Mark tiles as impassable immediately so pathfinding routes around the site
     for (let fy = 0; fy < def.h; fy++) {
       for (let fx = 0; fx < def.w; fx++) {
         this.mapTiles[ty + fy][tx + fx] = TERRAIN.BUILDING;
+        this._reservedTiles.add(`${tx + fx},${ty + fy}`);
       }
     }
 
+    // Construction site placeholder
     const bx = tx * TILE_SIZE, by = ty * TILE_SIZE;
     const bw = def.w * TILE_SIZE, bh = def.h * TILE_SIZE;
+
+    const ghost = this.add.graphics().setDepth(4);
+    ghost.fillStyle(def.color, 0.22);
+    ghost.fillRect(bx, by, bw, bh);
+    ghost.lineStyle(2, def.color, 0.55);
+    ghost.strokeRect(bx, by, bw, bh);
+
+    const progressBar  = this.add.graphics().setDepth(5);
+    const progressText = this.add.text(bx + bw / 2, by - 4, '', {
+      fontSize: '10px', fontFamily: 'monospace', color: '#88ccff',
+      stroke: '#000000', strokeThickness: 2,
+    }).setDepth(5).setOrigin(0.5, 1);
+
+    const site = { tx, ty, type: this._buildMode.type, def, timeBuilt: 0, ghost, progressBar, progressText, complete: false };
+    this.constructionSites.push(site);
+
+    // Send all selected workers to build
+    for (const w of this.selectedWorkers) w.buildAt(site);
+
+    this._cancelBuildMode();
+  }
+
+  onWorkerBuildTick(worker, site, delta) {
+    if (!site || site.complete) return true;
+    site.timeBuilt += delta;
+
+    const progress  = Math.min(site.timeBuilt / site.def.buildTime, 1);
+    const remaining = Math.ceil((site.def.buildTime - site.timeBuilt) / 1000);
+    const bx = site.tx * TILE_SIZE, by = site.ty * TILE_SIZE;
+    const bw = site.def.w * TILE_SIZE;
+
+    site.progressBar.clear();
+    site.progressBar.fillStyle(0x111122, 0.8);
+    site.progressBar.fillRect(bx, by - 8, bw, 5);
+    site.progressBar.fillStyle(0x44aa44, 1);
+    site.progressBar.fillRect(bx, by - 8, bw * progress, 5);
+    site.progressText.setText(`${site.def.label}: ${remaining}s`);
+
+    if (site.timeBuilt >= site.def.buildTime) {
+      this._completeBuild(site);
+      return true;
+    }
+    return false;
+  }
+
+  _completeBuild(site) {
+    site.complete = true;
+    const idx = this.constructionSites.indexOf(site);
+    if (idx !== -1) this.constructionSites.splice(idx, 1);
+
+    for (let fy = 0; fy < site.def.h; fy++) {
+      for (let fx = 0; fx < site.def.w; fx++) {
+        const nx = site.tx + fx, ny = site.ty + fy;
+        this.mapTiles[ny][nx] = TERRAIN.BUILDING;
+        this._reservedTiles.delete(`${nx},${ny}`);
+      }
+    }
+
+    site.ghost.destroy();
+    site.progressBar.destroy();
+    site.progressText.destroy();
+
+    if (site.type === 'tower') {
+      const tower = new Tower(this, site.tx, site.ty);
+      this.towers.push(tower);
+      return;
+    }
+
+    const bx = site.tx * TILE_SIZE, by = site.ty * TILE_SIZE;
+    const bw = site.def.w * TILE_SIZE, bh = site.def.h * TILE_SIZE;
     const bg = this.add.graphics().setDepth(4);
-    bg.fillStyle(def.color, 1);
+    bg.fillStyle(site.def.color, 1);
     bg.fillRect(bx, by, bw, bh);
     bg.lineStyle(2, 0xffffff, 0.4);
     bg.strokeRect(bx, by, bw, bh);
-    this.add.text(bx + bw / 2, by + bh / 2, def.label, {
+    this.add.text(bx + bw / 2, by + bh / 2, site.def.label, {
       fontSize: '10px', fontFamily: 'monospace', color: '#ffffff',
       stroke: '#000000', strokeThickness: 2,
     }).setDepth(5).setOrigin(0.5, 0.5);
-
-    this._cancelBuildMode();
   }
 
   _drawTrainBtn(hovered) {
