@@ -105,7 +105,7 @@ export default class Worker {
     const dist  = Math.sqrt((this.x - nearX) ** 2 + (this.y - nearY) ** 2);
     if (dist <= TILE_SIZE * 1.5) {
       this._building = true;
-      this.sprite.play('worker_axe');
+      this.sprite.play('worker_hammer');
     } else {
       this._cancelBuild();
     }

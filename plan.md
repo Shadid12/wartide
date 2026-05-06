@@ -34,3 +34,5 @@ When worker is building a building the worker needs to go near that area. It wil
 for the worker
 
 Let's make Tower a new entity.
+
+When tower is not built you can click a worker and right click on the tower to assign the worker to continue to build the tower 

@@ -63,6 +63,10 @@ export default class GameScene extends Phaser.Scene {
       frameWidth: 192,
       frameHeight: 192,
     });
+    this.load.spritesheet('worker_hammer', 'assets/sprites/worker/worker_Interact_Hammer.png', {
+      frameWidth: 192,
+      frameHeight: 192,
+    });
     this.load.spritesheet('worker_run_gold', 'assets/sprites/worker/worker_run_Gold.png', {
       frameWidth: 192,
       frameHeight: 192,
@@ -102,6 +106,12 @@ export default class GameScene extends Phaser.Scene {
     this.anims.create({
       key: 'worker_pickaxe',
       frames: this.anims.generateFrameNumbers('worker_pickaxe', { start: 0, end: 5 }),
+      frameRate: 8,
+      repeat: -1,
+    });
+    this.anims.create({
+      key: 'worker_hammer',
+      frames: this.anims.generateFrameNumbers('worker_hammer', { start: 0, end: 2 }),
       frameRate: 8,
       repeat: -1,
     });
@@ -389,12 +399,31 @@ export default class GameScene extends Phaser.Scene {
     return null;
   }
 
+  _constructionSiteAtWorldPoint(wx, wy) {
+    for (const site of this.constructionSites) {
+      if (site.complete) continue;
+      const l = site.tx * TILE_SIZE;
+      const r = (site.tx + site.def.w) * TILE_SIZE;
+      const t = site.ty * TILE_SIZE;
+      const b = (site.ty + site.def.h) * TILE_SIZE;
+      if (wx >= l && wx <= r && wy >= t && wy <= b) return site;
+    }
+    return null;
+  }
+
   issueHarvest(resource) {
     for (const w of this.selectedWorkers) w.harvestResource(resource);
     this.showMoveMarker(
       resource.x * TILE_SIZE + TILE_SIZE / 2,
       resource.y * TILE_SIZE + TILE_SIZE / 2,
     );
+  }
+
+  issueBuild(site) {
+    for (const w of this.selectedWorkers) w.buildAt(site);
+    const cx = (site.tx + site.def.w / 2) * TILE_SIZE;
+    const cy = (site.ty + site.def.h / 2) * TILE_SIZE;
+    this.showMoveMarker(cx, cy);
   }
 
   // Called when worker finishes a chop cycle. Deducts from the resource and
@@ -534,6 +563,11 @@ export default class GameScene extends Phaser.Scene {
       if (this._isOverMinimap(pointer.x, pointer.y)) return;
       if (this.selectedBuilding === this.townHall) {
         this.setRallyPoint(pointer.worldX, pointer.worldY);
+        return;
+      }
+      const site = this._constructionSiteAtWorldPoint(pointer.worldX, pointer.worldY);
+      if (site && this.selectedWorkers.length > 0) {
+        this.issueBuild(site);
         return;
       }
       const res = this._resourceAtWorldPoint(pointer.worldX, pointer.worldY);
@@ -897,10 +931,10 @@ export default class GameScene extends Phaser.Scene {
     this.wood -= def.woodCost;
     this.updateResourceHUD();
 
-    // Mark tiles as impassable immediately so pathfinding routes around the site
+    // Reserve tiles so no other building can overlap — tiles stay walkable
+    // until construction completes so workers can navigate to the site
     for (let fy = 0; fy < def.h; fy++) {
       for (let fx = 0; fx < def.w; fx++) {
-        this.mapTiles[ty + fy][tx + fx] = TERRAIN.BUILDING;
         this._reservedTiles.add(`${tx + fx},${ty + fy}`);
       }
     }
